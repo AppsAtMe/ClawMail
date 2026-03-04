@@ -172,7 +172,15 @@ struct ConnectionTestView: View {
         case .success:
             results.append(ConnectionTestResult(service: service, passed: true, message: "Connected"))
         case .failure(let error):
-            results.append(ConnectionTestResult(service: service, passed: false, message: error.localizedDescription))
+            // Use String(describing:) — localizedDescription goes through Foundation
+            // which can produce generic "error N" messages for non-NSError types.
+            let message: String
+            if let claw = error as? ClawMailError {
+                message = claw.message
+            } else {
+                message = String(describing: error)
+            }
+            results.append(ConnectionTestResult(service: service, passed: false, message: message))
         }
     }
 }

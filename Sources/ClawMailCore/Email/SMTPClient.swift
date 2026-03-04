@@ -200,19 +200,47 @@ public actor SMTPClient {
     }
 
     private func authenticate() async throws {
+        // Trim whitespace that may sneak in from copy-paste in the UI.
+        let user = senderEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+
         switch credentials {
-        case .password(let password):
-            // Try AUTH PLAIN first
-            let authString = "\0\(senderEmail)\0\(password)"
-            let encoded = Data(authString.utf8).base64EncodedString()
-            try await sendCommand("AUTH PLAIN \(encoded)")
-            let response = try await readResponse()
-            guard response.code == 235 else {
-                throw ClawMailError.authFailed("SMTP AUTH PLAIN failed: \(response.message)")
+        case .password(let rawPassword):
+            let password = rawPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Try AUTH PLAIN first, fall back to AUTH LOGIN if rejected.
+            let plainAuth = "\0\(user)\0\(password)"
+            let plainEncoded = Data(plainAuth.utf8).base64EncodedString()
+            try await sendCommand("AUTH PLAIN \(plainEncoded)")
+            let plainResp = try await readResponse()
+
+            if plainResp.code == 235 { return }
+
+            // 535 = credentials rejected — retrying with a different mechanism
+            // won't help, and Gmail closes the connection after 535 which would
+            // cause a raw NIO error that hides the real auth failure message.
+            if plainResp.code == 535 {
+                throw ClawMailError.authFailed("SMTP authentication failed: \(plainResp.message)")
+            }
+
+            // Other rejection (e.g. 504 mechanism not supported) — try AUTH LOGIN.
+            try await sendCommand("AUTH LOGIN")
+            let loginPrompt = try await readResponse()
+            guard loginPrompt.code == 334 else {
+                throw ClawMailError.authFailed("SMTP auth failed: \(plainResp.message)")
+            }
+            try await sendCommand(Data(user.utf8).base64EncodedString())
+            let userResp = try await readResponse()
+            guard userResp.code == 334 else {
+                throw ClawMailError.authFailed("SMTP AUTH LOGIN failed at username: \(userResp.message)")
+            }
+            try await sendCommand(Data(password.utf8).base64EncodedString())
+            let passResp = try await readResponse()
+            guard passResp.code == 235 else {
+                throw ClawMailError.authFailed("SMTP AUTH LOGIN failed: \(passResp.message)")
             }
 
         case .oauth2(let accessToken, _, _):
-            let authString = "user=\(senderEmail)\u{01}auth=Bearer \(accessToken)\u{01}\u{01}"
+            let authString = "user=\(user)\u{01}auth=Bearer \(accessToken)\u{01}\u{01}"
             let encoded = Data(authString.utf8).base64EncodedString()
             try await sendCommand("AUTH XOAUTH2 \(encoded)")
             let response = try await readResponse()

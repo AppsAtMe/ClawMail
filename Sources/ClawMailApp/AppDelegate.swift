@@ -28,8 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 semaphore.signal()
             }
         }
-        // Wait with timeout to avoid hanging if shutdown stalls
-        _ = semaphore.wait(timeout: .now() + 4.0)
+        // Wait with timeout to avoid hanging if shutdown stalls (e.g. stuck NIO connections)
+        _ = semaphore.wait(timeout: .now() + 2.0)
     }
 
     // MARK: - Service Lifecycle

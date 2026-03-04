@@ -4,6 +4,7 @@ import ClawMailCore
 /// SwiftUI view for the menu bar dropdown menu.
 struct StatusMenu: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openSettings) private var openSettingsAction
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -80,6 +81,10 @@ struct StatusMenu: View {
             Divider()
 
             Button("Quit ClawMail") {
+                // Use exit() as fallback if terminate hangs due to stuck NIO connections
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    exit(0)
+                }
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q", modifiers: .command)
@@ -87,7 +92,7 @@ struct StatusMenu: View {
     }
 
     private func openSettings() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        openSettingsAction()
         NSApp.activate(ignoringOtherApps: true)
     }
 

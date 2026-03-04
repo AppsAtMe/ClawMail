@@ -9,6 +9,20 @@ struct ConnectionTestResult: Identifiable {
     let message: String
 }
 
+/// Ensures a continuation is resumed exactly once from concurrent tasks.
+private final class OnceGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
+        return true
+    }
+}
+
 /// Tests IMAP, SMTP, CalDAV, CardDAV connections sequentially with progress.
 struct ConnectionTestView: View {
     @Environment(AppState.self) private var appState
@@ -18,16 +32,12 @@ struct ConnectionTestView: View {
     let account: Account
     let password: String
 
+    private let timeoutSeconds = 15
+
     var body: some View {
         VStack(spacing: 16) {
             Text("Connection Test")
                 .font(.title2.bold())
-
-            if results.isEmpty && !inProgress {
-                Text("Testing connections to your email servers...")
-                    .foregroundStyle(.secondary)
-                    .onAppear { runTests() }
-            }
 
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(results) { result in
@@ -57,8 +67,8 @@ struct ConnectionTestView: View {
             .cornerRadius(8)
         }
         .padding()
-        .onChange(of: inProgress) { _, testing in
-            if testing && results.isEmpty {
+        .task(id: results.isEmpty) {
+            if results.isEmpty && !inProgress {
                 runTests()
             }
         }
@@ -129,12 +139,39 @@ struct ConnectionTestView: View {
         }
     }
 
+    /// Run a test with a timeout. Uses unstructured Tasks + a once-gate so the
+    /// timeout actually fires even if the NIO connection is stuck (NIO futures
+    /// don't respond to Swift Task cancellation).
     @MainActor
     private func addResult(service: String, test: @escaping @Sendable () async throws -> Void) async {
-        do {
-            try await test()
+        let result: Result<Void, Error> = await withCheckedContinuation { continuation in
+            let gate = OnceGate()
+
+            // Operation task (unstructured — won't block the continuation)
+            Task {
+                do {
+                    try await test()
+                    if gate.claim() { continuation.resume(returning: .success(())) }
+                } catch {
+                    if gate.claim() { continuation.resume(returning: .failure(error)) }
+                }
+            }
+
+            // Timeout task
+            Task {
+                try? await Task.sleep(for: .seconds(timeoutSeconds))
+                if gate.claim() {
+                    continuation.resume(returning: .failure(
+                        ClawMailError.connectionError("Connection timed out after \(timeoutSeconds) seconds")
+                    ))
+                }
+            }
+        }
+
+        switch result {
+        case .success:
             results.append(ConnectionTestResult(service: service, passed: true, message: "Connected"))
-        } catch {
+        case .failure(let error):
             results.append(ConnectionTestResult(service: service, passed: false, message: error.localizedDescription))
         }
     }

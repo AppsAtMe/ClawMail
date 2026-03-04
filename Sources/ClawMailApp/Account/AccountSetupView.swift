@@ -332,6 +332,9 @@ private struct CredentialsFormView: View {
                     Text("STARTTLS").tag(ConnectionSecurity.starttls)
                 }
                 .frame(width: 100)
+                .onChange(of: imapSecurity) { _, newValue in
+                    imapPort = newValue == .ssl ? "993" : "143"
+                }
             }
         }
     }
@@ -350,6 +353,9 @@ private struct CredentialsFormView: View {
                     Text("STARTTLS").tag(ConnectionSecurity.starttls)
                 }
                 .frame(width: 100)
+                .onChange(of: smtpSecurity) { _, newValue in
+                    smtpPort = newValue == .ssl ? "465" : "587"
+                }
             }
         }
     }

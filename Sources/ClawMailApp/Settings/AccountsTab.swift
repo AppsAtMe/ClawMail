@@ -9,23 +9,25 @@ struct AccountsTab: View {
     @State private var showingDeleteConfirm = false
 
     var body: some View {
-        HSplitView {
+        HStack(spacing: 0) {
             // Account list sidebar
-            VStack(alignment: .leading, spacing: 0) {
-                List(appState.accounts, selection: $selectedAccountId) { account in
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(statusColor(for: account.connectionStatus))
-                            .frame(width: 8, height: 8)
-                        VStack(alignment: .leading) {
-                            Text(account.label)
-                                .font(.headline)
-                            Text(account.emailAddress)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                List(selection: $selectedAccountId) {
+                    ForEach(appState.accounts) { account in
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(statusColor(for: account.connectionStatus))
+                                .frame(width: 8, height: 8)
+                            VStack(alignment: .leading) {
+                                Text(account.label)
+                                    .font(.headline)
+                                Text(account.emailAddress)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
+                        .tag(account.id)
                     }
-                    .tag(account.id)
                 }
                 .listStyle(.sidebar)
 
@@ -49,17 +51,21 @@ struct AccountsTab: View {
                 }
                 .padding(8)
             }
-            .frame(minWidth: 200, maxWidth: 250)
+            .frame(width: 220)
+
+            Divider()
 
             // Account detail
             if let account = selectedAccount {
                 AccountDetailView(account: account)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView(
                     "No Account Selected",
                     systemImage: "person.crop.circle",
                     description: Text("Select an account or click + to add one.")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .sheet(isPresented: $showingSetup) {

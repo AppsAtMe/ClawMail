@@ -82,21 +82,20 @@ struct OAuthFlowView: View {
         inProgress = true
         status = .browserOpened
 
-        // In a full implementation, this would use OAuth2Manager to:
-        // 1. Generate the authorization URL
-        // 2. Open the browser
-        // 3. Start a local HTTP listener for the callback
-        // 4. Exchange the code for tokens
-        // 5. Save tokens to keychain
-        // For now, this is a placeholder that shows the flow structure.
-
-        // Placeholder: In a full implementation, this would use OAuth2Manager to:
-        // 1. Generate the authorization URL
-        // 2. Open the browser via NSWorkspace
-        // 3. Start a local HTTP listener for the callback
-        // 4. Exchange the code for tokens
-        // 5. Save tokens to keychain
-        // For now, mark as completed after a delay to show the flow structure.
+        // PLACEHOLDER: Full OAuth implementation is tracked in ROADMAP.md.
+        //
+        // When implementing, the flow must:
+        // 1. Generate a cryptographically random `state` parameter (use SecRandomCopyBytes)
+        // 2. Include `state` in the authorization URL
+        // 3. Start a local HTTP listener for the callback on 127.0.0.1
+        // 4. On callback, VALIDATE that the returned `state` matches the one sent
+        //    (this prevents CSRF attacks where a malicious site redirects the user
+        //     with an attacker's authorization code)
+        // 5. Exchange the code for tokens over HTTPS
+        // 6. Save tokens to Keychain
+        //
+        // SECURITY: Omitting state validation enables OAuth CSRF attacks.
+        // See: https://datatracker.ietf.org/doc/html/rfc6749#section-10.12
         Task {
             try? await Task.sleep(for: .seconds(1))
             await MainActor.run {

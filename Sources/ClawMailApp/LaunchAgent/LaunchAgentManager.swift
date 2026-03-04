@@ -14,9 +14,19 @@ enum LaunchAgentManager {
         launchAgentsDirectory.appendingPathComponent(plistFilename)
     }
 
+    /// Escape a string for safe inclusion in XML/plist content.
+    private static func xmlEscape(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;")
+         .replacingOccurrences(of: "<", with: "&lt;")
+         .replacingOccurrences(of: ">", with: "&gt;")
+         .replacingOccurrences(of: "\"", with: "&quot;")
+         .replacingOccurrences(of: "'", with: "&apos;")
+    }
+
     /// Generate the LaunchAgent plist content.
     static func plistContent(programPath: String = "/usr/local/bin/clawmail") -> String {
-        """
+        let safePath = xmlEscape(programPath)
+        return """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0">
@@ -24,10 +34,10 @@ enum LaunchAgentManager {
             <key>Label</key>
             <string>\(label)</string>
             <key>Program</key>
-            <string>\(programPath)</string>
+            <string>\(safePath)</string>
             <key>ProgramArguments</key>
             <array>
-                <string>\(programPath)</string>
+                <string>\(safePath)</string>
                 <string>daemon</string>
             </array>
             <key>RunAtLoad</key>

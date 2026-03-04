@@ -196,17 +196,17 @@ public actor SMTPClient {
         let messageId = generateMessageId(domain: message.from.domain)
         let mimeData = buildMIME(message: message, messageId: messageId)
 
-        // MAIL FROM
-        try await sendCommand("MAIL FROM:<\(message.from.email)>")
+        // MAIL FROM — sanitize email to prevent SMTP command injection
+        try await sendCommand("MAIL FROM:<\(sanitizeHeaderValue(message.from.email))>")
         let fromResponse = try await readResponse()
         guard fromResponse.code == 250 else {
             throw ClawMailError.connectionError("MAIL FROM rejected: \(fromResponse.message)")
         }
 
-        // RCPT TO for all recipients
+        // RCPT TO for all recipients — sanitize each address
         let allRecipients = message.to + message.cc + message.bcc
         for recipient in allRecipients {
-            try await sendCommand("RCPT TO:<\(recipient.email)>")
+            try await sendCommand("RCPT TO:<\(sanitizeHeaderValue(recipient.email))>")
             let rcptResponse = try await readResponse()
             guard rcptResponse.code == 250 else {
                 throw ClawMailError.connectionError("RCPT TO rejected for \(recipient.email): \(rcptResponse.message)")
@@ -244,6 +244,12 @@ public actor SMTPClient {
 
     // MARK: - MIME Construction
 
+    /// Strip CR and LF to prevent SMTP header injection.
+    private func sanitizeHeaderValue(_ value: String) -> String {
+        value.replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+    }
+
     private func buildMIME(message: OutgoingEmail, messageId: String) -> String {
         let boundary = "ClawMail-\(UUID().uuidString)"
         let dateFmt = DateFormatter()
@@ -251,24 +257,28 @@ public actor SMTPClient {
         dateFmt.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
 
         var headers: [String] = []
-        headers.append("Message-ID: <\(messageId)>")
+        headers.append("Message-ID: <\(sanitizeHeaderValue(messageId))>")
         headers.append("Date: \(dateFmt.string(from: Date()))")
-        headers.append("From: \(message.from.displayString)")
-        headers.append("To: \(message.to.map(\.displayString).joined(separator: ", "))")
+        headers.append("From: \(sanitizeHeaderValue(message.from.displayString))")
+        headers.append("To: \(message.to.map { sanitizeHeaderValue($0.displayString) }.joined(separator: ", "))")
         if !message.cc.isEmpty {
-            headers.append("Cc: \(message.cc.map(\.displayString).joined(separator: ", "))")
+            headers.append("Cc: \(message.cc.map { sanitizeHeaderValue($0.displayString) }.joined(separator: ", "))")
         }
         headers.append("Subject: \(encodeHeader(message.subject))")
         headers.append("MIME-Version: 1.0")
 
         if let inReplyTo = message.inReplyTo {
-            headers.append("In-Reply-To: <\(inReplyTo)>")
+            headers.append("In-Reply-To: <\(sanitizeHeaderValue(inReplyTo))>")
         }
         if let references = message.references {
-            headers.append("References: \(references)")
+            headers.append("References: \(sanitizeHeaderValue(references))")
         }
         for (key, value) in message.customHeaders {
-            headers.append("\(key): \(value)")
+            let safeKey = sanitizeHeaderValue(key)
+            let safeValue = sanitizeHeaderValue(value)
+            // Also reject keys containing ":" to prevent header name spoofing
+            guard !safeKey.contains(":") else { continue }
+            headers.append("\(safeKey): \(safeValue)")
         }
 
         var body: String
@@ -299,9 +309,12 @@ public actor SMTPClient {
             }
 
             for attachment in message.attachments {
+                let safeName = sanitizeHeaderValue(attachment.filename)
+                    .replacingOccurrences(of: "\"", with: "'")
+                let safeMime = sanitizeHeaderValue(attachment.mimeType)
                 body += "--\(boundary)\r\n"
-                body += "Content-Type: \(attachment.mimeType); name=\"\(attachment.filename)\"\r\n"
-                body += "Content-Disposition: attachment; filename=\"\(attachment.filename)\"\r\n"
+                body += "Content-Type: \(safeMime); name=\"\(safeName)\"\r\n"
+                body += "Content-Disposition: attachment; filename=\"\(safeName)\"\r\n"
                 body += "Content-Transfer-Encoding: base64\r\n\r\n"
                 body += attachment.data.base64EncodedString(options: .lineLength76Characters) + "\r\n"
             }
@@ -339,11 +352,13 @@ public actor SMTPClient {
     }
 
     private func encodeHeader(_ value: String) -> String {
+        // Always strip CRLF first to prevent header injection, even for ASCII values
+        let safe = sanitizeHeaderValue(value)
         // RFC 2047 encoding for non-ASCII
-        if value.unicodeScalars.allSatisfy({ $0.isASCII }) {
-            return value
+        if safe.unicodeScalars.allSatisfy({ $0.isASCII }) {
+            return safe
         }
-        let encoded = Data(value.utf8).base64EncodedString()
+        let encoded = Data(safe.utf8).base64EncodedString()
         return "=?UTF-8?B?\(encoded)?="
     }
 

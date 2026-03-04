@@ -135,18 +135,17 @@ public final class MetadataIndex: Sendable {
                 JOIN message_fts f ON m.rowid = f.rowid
                 WHERE f.message_fts MATCH ? AND m.account_label = ?
             """
-            var args: [DatabaseValueConvertible?] = [sanitizedQuery, account]
+            var args: StatementArguments = [sanitizedQuery, account]
 
             if let folder = folder {
                 sql += " AND m.folder = ?"
-                args.append(folder)
+                args += [folder]
             }
 
             sql += " ORDER BY m.date DESC LIMIT ? OFFSET ?"
-            args.append(limit)
-            args.append(offset)
+            args += [limit, offset]
 
-            let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args)!)
+            let rows = try Row.fetchAll(db, sql: sql, arguments: args)
             return rows.compactMap { try? Self.summaryFromRow($0) }
         }
     }
@@ -242,13 +241,13 @@ public final class MetadataIndex: Sendable {
     public func listApprovedRecipients(account: String? = nil) throws -> [(email: String, approvedAt: Date)] {
         try db.read { db in
             var sql = "SELECT email, approved_at FROM approved_recipients"
-            var args: [DatabaseValueConvertible?] = []
+            var args: StatementArguments = []
             if let account = account {
                 sql += " WHERE account_label = ?"
-                args.append(account)
+                args += [account]
             }
             sql += " ORDER BY approved_at DESC"
-            let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args)!)
+            let rows = try Row.fetchAll(db, sql: sql, arguments: args)
             return rows.map { (email: $0["email"], approvedAt: $0["approved_at"]) }
         }
     }
@@ -275,21 +274,19 @@ public final class MetadataIndex: Sendable {
 
     // MARK: - Row Mapping
 
-    /// Sanitize a search query for FTS5. If the query contains unbalanced quotes
-    /// or FTS5 operators that would cause a parse error, wrap it as a phrase search.
+    /// Sanitize a search query for FTS5. Always escapes the input as a phrase
+    /// search to prevent FTS5 query injection (operator injection, cross-column search).
+    /// Internal callers that need FTS5 operators (like SearchEngine.ftsQuery) construct
+    /// their own queries with per-term escaping before reaching this layer.
     static func sanitizeFTS5Query(_ query: String) -> String {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "\"\"" }
 
-        // Check for unbalanced double quotes
-        let quoteCount = trimmed.filter { $0 == "\"" }.count
-        if quoteCount % 2 != 0 {
-            // Unbalanced quotes — escape the whole thing as a phrase
-            let escaped = trimmed.replacingOccurrences(of: "\"", with: "\"\"")
-            return "\"\(escaped)\""
-        }
-
-        return trimmed
+        // Always wrap as a phrase search: double any internal quotes and wrap in quotes.
+        // This prevents FTS5 operators (AND, OR, NOT, NEAR, column filters, prefix *)
+        // from being interpreted, ensuring the query is treated as a literal phrase.
+        let escaped = trimmed.replacingOccurrences(of: "\"", with: "\"\"")
+        return "\"\(escaped)\""
     }
 
     private static func summaryFromRow(_ row: Row) throws -> EmailSummary {

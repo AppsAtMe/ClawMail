@@ -148,6 +148,7 @@ public indirect enum IMAPSearchCriteria: Sendable, Equatable {
     case not(IMAPSearchCriteria)
 
     /// Render to IMAP SEARCH command syntax.
+    /// All string values are sanitized to prevent IMAP command injection (CRLF stripping + quote escaping).
     public func commandString() -> String {
         let formatter = IMAPDateFormatter.searchDateFormatter
         switch self {
@@ -158,14 +159,14 @@ public indirect enum IMAPSearchCriteria: Sendable, Equatable {
         case .unflagged: return "UNFLAGGED"
         case .answered: return "ANSWERED"
         case .deleted: return "DELETED"
-        case .from(let s): return "FROM \"\(s)\""
-        case .to(let s): return "TO \"\(s)\""
-        case .subject(let s): return "SUBJECT \"\(s)\""
-        case .body(let s): return "BODY \"\(s)\""
+        case .from(let s): return "FROM \(Self.quoteSearchString(s))"
+        case .to(let s): return "TO \(Self.quoteSearchString(s))"
+        case .subject(let s): return "SUBJECT \(Self.quoteSearchString(s))"
+        case .body(let s): return "BODY \(Self.quoteSearchString(s))"
         case .before(let d): return "BEFORE \(formatter.string(from: d))"
         case .since(let d): return "SINCE \(formatter.string(from: d))"
         case .on(let d): return "ON \(formatter.string(from: d))"
-        case .header(let name, let value): return "HEADER \"\(name)\" \"\(value)\""
+        case .header(let name, let value): return "HEADER \(Self.quoteSearchString(name)) \(Self.quoteSearchString(value))"
         case .uid(let range): return "UID \(range.lowerBound):\(range.upperBound)"
         case .larger(let n): return "LARGER \(n)"
         case .smaller(let n): return "SMALLER \(n)"
@@ -173,6 +174,16 @@ public indirect enum IMAPSearchCriteria: Sendable, Equatable {
         case .or(let a, let b): return "OR (\(a.commandString())) (\(b.commandString()))"
         case .not(let c): return "NOT (\(c.commandString()))"
         }
+    }
+
+    /// Quote and sanitize a string for IMAP SEARCH criteria.
+    /// Strips CR/LF to prevent command injection, escapes backslash and double-quote.
+    private static func quoteSearchString(_ s: String) -> String {
+        let sanitized = s.replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+        let escaped = sanitized.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
     }
 }
 
@@ -920,10 +931,17 @@ public actor IMAPClient {
     }
 
     /// Fetch a specific MIME section (e.g. attachment data) by section number.
+    /// Section must be a valid MIME section specifier (digits and dots only, e.g. "1", "1.2", "2.1.3").
     public func fetchAttachment(folder: String, uid: UInt32, section: String) async throws -> Data {
         try ensureConnected()
         if selectedFolder != folder {
             _ = try await selectFolder(folder)
+        }
+
+        // Validate section is a safe MIME section specifier (digits and dots only)
+        let sectionPattern = /^[0-9]+(\.[0-9]+)*$/
+        guard section.wholeMatch(of: sectionPattern) != nil else {
+            throw ClawMailError.invalidParameter("Invalid MIME section specifier: \(section)")
         }
 
         let tag = nextTag()
@@ -1016,8 +1034,12 @@ public actor IMAPClient {
         }
     }
 
-    private func quoteIMAPString(_ s: String) -> String {
-        let escaped = s.replacingOccurrences(of: "\\", with: "\\\\")
+    /// Quote a string for safe inclusion in IMAP commands.
+    /// Strips CR/LF to prevent IMAP command injection, then escapes backslash and double-quote.
+    func quoteIMAPString(_ s: String) -> String {
+        let sanitized = s.replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+        let escaped = sanitized.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return "\"\(escaped)\""
     }

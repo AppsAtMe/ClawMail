@@ -55,11 +55,11 @@ public actor APIServer {
     private func buildRouter() -> Router<BasicRequestContext> {
         let router = Router()
 
-        // Require auth middleware — refuse to start without an API key
-        guard let apiKey = apiKey else {
+        // Auth middleware reads from Keychain on each request for hot-reload support
+        guard apiKey != nil else {
             preconditionFailure("APIServer requires a non-nil apiKey")
         }
-        router.middlewares.add(AuthMiddleware(apiKey: apiKey))
+        router.middlewares.add(AuthMiddleware(keychainManager: KeychainManager()))
 
         // Register all route groups
         StatusRoutes.register(on: router, orchestrator: orchestrator)
@@ -193,23 +193,38 @@ func decodeBody<T: Decodable>(_ type: T.Type, from request: Request, context: Ba
 
 // MARK: - Query Parameter Helpers
 
+/// Maximum allowed length for string query parameters (4 KB).
+private let maxQueryParamLength = 4096
+
+/// Maximum allowed limit for paginated queries.
+private let maxResultLimit = 500
+
 /// Get a required query parameter or throw ClawMailError.invalidParameter.
 func requireQueryParam(_ params: Parameters, _ name: String) throws -> String {
     guard let value = params.get(name) else {
         throw ClawMailError.invalidParameter("Missing required query parameter: \(name)")
+    }
+    guard value.count <= maxQueryParamLength else {
+        throw ClawMailError.invalidParameter("Query parameter '\(name)' exceeds maximum length")
     }
     return value
 }
 
 /// Get an optional String query parameter.
 func optionalQueryParam(_ params: Parameters, _ name: String) -> String? {
-    params.get(name)
+    guard let value = params.get(name) else { return nil }
+    guard value.count <= maxQueryParamLength else { return nil }
+    return value
 }
 
-/// Get an optional Int query parameter with a default value.
+/// Get an optional Int query parameter with a default value. Clamps to maxResultLimit for "limit" params.
 func intQueryParam(_ params: Parameters, _ name: String, default defaultValue: Int) -> Int {
     guard let value = params.get(name, as: Int.self) else {
         return defaultValue
+    }
+    // Cap pagination limits to prevent excessive query results
+    if name == "limit" {
+        return min(max(value, 1), maxResultLimit)
     }
     return value
 }

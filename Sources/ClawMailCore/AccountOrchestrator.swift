@@ -359,7 +359,7 @@ public actor AccountOrchestrator {
         try auditSuccess(
             operation: "contacts.create",
             account: account,
-            parameters: ["displayName": .string(request.displayName ?? "")]
+            parameters: ["displayName": .string(request.displayName)]
         )
 
         return contact

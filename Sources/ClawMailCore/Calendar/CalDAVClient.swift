@@ -707,7 +707,6 @@ public enum ICalendarParser: Sendable {
         var current: ParsedEvent?
         var inVEvent = false
         var inVAlarm = false
-        var alarmAction: String?
         var alarmTrigger: String?
 
         for line in lines {
@@ -720,7 +719,7 @@ public enum ICalendarParser: Sendable {
                 continue
             }
             if trimmed == "END:VEVENT" {
-                if var event = current {
+                if let event = current {
                     events.append(event)
                 }
                 current = nil
@@ -729,7 +728,6 @@ public enum ICalendarParser: Sendable {
             }
             if trimmed == "BEGIN:VALARM" {
                 inVAlarm = true
-                alarmAction = nil
                 alarmTrigger = nil
                 continue
             }
@@ -749,7 +747,6 @@ public enum ICalendarParser: Sendable {
                 let (key, value) = splitProperty(trimmed)
                 let baseKey = key.components(separatedBy: ";").first ?? key
                 switch baseKey {
-                case "ACTION": alarmAction = value
                 case "TRIGGER": alarmTrigger = value
                 default: break
                 }

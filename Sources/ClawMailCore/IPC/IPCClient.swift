@@ -45,6 +45,26 @@ public final class IPCClient: @unchecked Sendable {
         } catch {
             throw ClawMailError.daemonNotRunning
         }
+
+        // Perform authentication handshake
+        try await authenticate()
+    }
+
+    /// Read the IPC token from the token file and send an auth.handshake message.
+    private func authenticate() async throws {
+        let tokenPath = IPCServer.tokenPath
+        guard let token = try? String(contentsOfFile: tokenPath, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines) else {
+            throw ClawMailError.authFailed("Cannot read IPC token file at \(tokenPath)")
+        }
+
+        let response = try await send(
+            method: "auth.handshake",
+            params: ["token": .string(token)]
+        )
+        if let error = response.error {
+            throw ClawMailError.authFailed("IPC handshake failed: \(error.message)")
+        }
     }
 
     public func disconnect() async {

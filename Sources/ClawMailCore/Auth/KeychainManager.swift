@@ -7,8 +7,9 @@ public actor KeychainManager {
     private static let apiKeyAccount = "clawmail-api-key"
 
     public init() {
+        // Use thisDeviceOnly to prevent OAuth tokens and credentials from syncing via iCloud Keychain
         self.keychain = Keychain(service: Self.serviceName)
-            .accessibility(.afterFirstUnlock)
+            .accessibility(.afterFirstUnlockThisDeviceOnly)
     }
 
     // MARK: - Password Storage

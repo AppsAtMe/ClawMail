@@ -1,5 +1,17 @@
 import Foundation
 import NIO
+import Security
+
+/// Thread-safe box for storing a string value.
+private final class TokenBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: String?
+
+    var value: String? {
+        get { lock.lock(); defer { lock.unlock() }; return _value }
+        set { lock.lock(); defer { lock.unlock() }; _value = newValue }
+    }
+}
 
 /// Thread-safe box for storing channel references.
 /// Used by IPCServer from both NIO event loop threads and async contexts.
@@ -30,9 +42,30 @@ public final class IPCServer: Sendable {
     private let group: EventLoopGroup
     private let channels = ChannelBox()
 
+    /// IPC authentication token. Clients must send this in an `auth.handshake` message
+    /// as their first request. Stored in a thread-safe box for Sendable conformance.
+    private let tokenBox = TokenBox()
+
+    var ipcToken: String? {
+        get { tokenBox.value }
+        set { tokenBox.value = newValue }
+    }
+
+    static func generateToken() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return bytes.map { String(format: "%02x", $0) }.joined()
+    }
+
     public static var defaultSocketPath: String {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return appSupport.appendingPathComponent("ClawMail/clawmail.sock").path
+    }
+
+    /// Path to the IPC authentication token file.
+    public static var tokenPath: String {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("ClawMail/ipc.token").path
     }
 
     public init(orchestrator: AccountOrchestrator, socketPath: String? = nil) {
@@ -50,6 +83,17 @@ public final class IPCServer: Sendable {
         // Ensure the directory exists
         let dir = (socketPath as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+        // Generate IPC auth token and write to file with restrictive permissions
+        let token = Self.generateToken()
+        self.ipcToken = token
+        let tokenPath = Self.tokenPath
+        try token.write(toFile: tokenPath, atomically: true, encoding: .utf8)
+        // Set file permissions to owner-only (0600)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: tokenPath
+        )
 
         let handler = IPCServerHandler(orchestrator: orchestrator, server: self)
 
@@ -72,6 +116,8 @@ public final class IPCServer: Sendable {
         ch?.close(mode: .all, promise: noPromise)
         try? await group.shutdownGracefully()
         try? FileManager.default.removeItem(atPath: socketPath)
+        try? FileManager.default.removeItem(atPath: Self.tokenPath)
+        ipcToken = nil
     }
 
     /// Send a notification to the connected client (if any).
@@ -98,10 +144,21 @@ public final class IPCServer: Sendable {
 // MARK: - Newline Frame Decoder
 
 /// Splits incoming bytes on newline boundaries (one JSON-RPC message per line).
+/// Enforces a maximum frame size to prevent memory exhaustion from malicious clients.
 final class NewlineFrameDecoder: ByteToMessageDecoder, Sendable {
     typealias InboundOut = ByteBuffer
 
+    /// Maximum allowed message size (10 MB). JSON-RPC messages with email content
+    /// can be large but should never exceed this.
+    private static let maxFrameSize = 10 * 1024 * 1024
+
     func decode(context: ChannelHandlerContext, buffer: inout ByteBuffer) throws -> DecodingState {
+        // Check if buffered data exceeds max frame size before finding a newline
+        if buffer.readableBytes > Self.maxFrameSize {
+            buffer.clear()
+            throw ClawMailError.invalidParameter("IPC message exceeds maximum size of \(Self.maxFrameSize) bytes")
+        }
+
         guard let newlineIndex = buffer.readableBytesView.firstIndex(of: 0x0A) else {
             return .needMoreData
         }
@@ -123,6 +180,7 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
     private let orchestrator: AccountOrchestrator
     private let server: IPCServer
     private let dispatcher: IPCDispatcher
+    private var authenticated = false
 
     init(orchestrator: AccountOrchestrator, server: IPCServer) {
         self.orchestrator = orchestrator
@@ -163,11 +221,16 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
         guard let bytes = buffer.readBytes(length: buffer.readableBytes) else { return }
         let requestData = Data(bytes)
 
-        // Capture channel and allocator before entering Task to avoid
+        // If not authenticated, the first message must be an auth.handshake
+        if !authenticated {
+            handleHandshake(requestData, context: context)
+            return
+        }
+
+        // Capture channel and dispatcher before entering Task to avoid
         // sending non-Sendable ChannelHandlerContext across isolation boundaries.
         let channel = context.channel
         let dispatcherRef = dispatcher
-        let wrapFn = self.wrapOutboundOut
 
         Task {
             let response = await dispatcherRef.dispatch(requestData)
@@ -175,8 +238,54 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
             var outBuffer = channel.allocator.buffer(capacity: responseData.count)
             outBuffer.writeBytes(responseData)
             let noPromise: EventLoopPromise<Void>? = nil
-            channel.writeAndFlush(wrapFn(outBuffer), promise: noPromise)
+            channel.writeAndFlush(outBuffer, promise: noPromise)
         }
+    }
+
+    /// Validate the client's handshake message containing the IPC token.
+    private func handleHandshake(_ data: Data, context: ChannelHandlerContext) {
+        guard let request = try? decodeJSONRPC(JSONRPCRequest.self, from: data),
+              request.method == "auth.handshake" else {
+            let resp = JSONRPCResponse.error(
+                id: nil, code: JSONRPCError.authFailed,
+                message: "First message must be auth.handshake with a valid token"
+            )
+            sendAndClose(resp, context: context)
+            return
+        }
+
+        guard let params = request.params,
+              case .string(let token) = params["token"],
+              let expected = server.ipcToken,
+              token == expected else {
+            let resp = JSONRPCResponse.error(
+                id: request.id, code: JSONRPCError.authFailed,
+                message: "Invalid IPC authentication token"
+            )
+            sendAndClose(resp, context: context)
+            return
+        }
+
+        authenticated = true
+        let resp = JSONRPCResponse.success(id: request.id, result: .dictionary(["ok": .bool(true)]))
+        if let responseData = try? encodeJSONRPC(resp) {
+            var outBuffer = context.channel.allocator.buffer(capacity: responseData.count)
+            outBuffer.writeBytes(responseData)
+            let noPromise: EventLoopPromise<Void>? = nil
+            context.writeAndFlush(wrapOutboundOut(outBuffer), promise: noPromise)
+        }
+    }
+
+    /// Send a response and close the connection.
+    private func sendAndClose(_ response: JSONRPCResponse, context: ChannelHandlerContext) {
+        if let responseData = try? encodeJSONRPC(response) {
+            var outBuffer = context.channel.allocator.buffer(capacity: responseData.count)
+            outBuffer.writeBytes(responseData)
+            let noPromise: EventLoopPromise<Void>? = nil
+            context.writeAndFlush(wrapOutboundOut(outBuffer), promise: noPromise)
+        }
+        let noPromise: EventLoopPromise<Void>? = nil
+        context.close(promise: noPromise)
     }
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {

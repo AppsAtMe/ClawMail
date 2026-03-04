@@ -15,6 +15,15 @@ public actor WebhookManager {
         guard let urlString = urlString, let url = URL(string: urlString) else {
             return nil
         }
+        // Only allow http/https schemes to prevent SSRF via file://, ftp://, etc.
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            return nil
+        }
+        // Block requests to cloud metadata endpoints and loopback
+        let blockedHosts = ["169.254.169.254", "metadata.google.internal", "[::1]"]
+        if let host = url.host?.lowercased(), blockedHosts.contains(host) {
+            return nil
+        }
         self.webhookURL = url
 
         let config = URLSessionConfiguration.default

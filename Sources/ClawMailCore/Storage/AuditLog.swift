@@ -53,23 +53,23 @@ public final class AuditLog: Sendable {
     ) throws -> [AuditEntry] {
         try db.read { db in
             var conditions: [String] = []
-            var args: [DatabaseValueConvertible?] = []
+            var args: StatementArguments = []
 
             if let account = account {
                 conditions.append("account_label = ?")
-                args.append(account)
+                args += [account]
             }
             if let operation = operation {
                 conditions.append("operation = ?")
-                args.append(operation)
+                args += [operation]
             }
             if let from = from {
                 conditions.append("timestamp >= ?")
-                args.append(from)
+                args += [from]
             }
             if let to = to {
                 conditions.append("timestamp <= ?")
-                args.append(to)
+                args += [to]
             }
 
             var sql = "SELECT * FROM audit_log"
@@ -77,10 +77,9 @@ public final class AuditLog: Sendable {
                 sql += " WHERE " + conditions.joined(separator: " AND ")
             }
             sql += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
-            args.append(limit)
-            args.append(offset)
+            args += [limit, offset]
 
-            let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args)!)
+            let rows = try Row.fetchAll(db, sql: sql, arguments: args)
             return rows.compactMap { Self.entryFromRow($0) }
         }
     }
@@ -88,15 +87,15 @@ public final class AuditLog: Sendable {
     public func count(account: String? = nil, operation: String? = nil) throws -> Int {
         try db.read { db in
             var conditions: [String] = []
-            var args: [DatabaseValueConvertible?] = []
+            var args: StatementArguments = []
 
             if let account = account {
                 conditions.append("account_label = ?")
-                args.append(account)
+                args += [account]
             }
             if let operation = operation {
                 conditions.append("operation = ?")
-                args.append(operation)
+                args += [operation]
             }
 
             var sql = "SELECT COUNT(*) FROM audit_log"
@@ -104,7 +103,7 @@ public final class AuditLog: Sendable {
                 sql += " WHERE " + conditions.joined(separator: " AND ")
             }
 
-            return try Int.fetchOne(db, sql: sql, arguments: StatementArguments(args)!) ?? 0
+            return try Int.fetchOne(db, sql: sql, arguments: args) ?? 0
         }
     }
 

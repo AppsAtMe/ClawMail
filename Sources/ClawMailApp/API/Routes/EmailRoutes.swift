@@ -233,9 +233,16 @@ enum EmailRoutes {
                 }
                 let decodedFilename = filename.removingPercentEncoding ?? filename
 
-                // Download to a temporary path
+                // Sanitize filename: strip path separators and traversal components
+                let safeFilename = URL(fileURLWithPath: decodedFilename).lastPathComponent
+                guard !safeFilename.isEmpty, safeFilename != ".", safeFilename != ".." else {
+                    return badRequestResponse("Invalid attachment filename")
+                }
+
+                // Download to a temporary path within a unique subdirectory
                 let tempDir = NSTemporaryDirectory()
-                let tempPath = (tempDir as NSString).appendingPathComponent(decodedFilename)
+                let uniqueDir = (tempDir as NSString).appendingPathComponent("clawmail-\(UUID().uuidString)")
+                let tempPath = (uniqueDir as NSString).appendingPathComponent(safeFilename)
 
                 let result = try await orchestrator.downloadAttachment(
                     account: account,

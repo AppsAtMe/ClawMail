@@ -181,6 +181,7 @@ public actor EmailManager {
         var outgoingAttachments: [OutgoingAttachment] = []
         if let paths = request.attachments {
             for path in paths {
+                _ = try Self.validateAttachmentSourcePath(path)
                 let attachment = try OutgoingAttachment.fromFile(path: path)
                 outgoingAttachments.append(attachment)
             }
@@ -273,6 +274,7 @@ public actor EmailManager {
         var outgoingAttachments: [OutgoingAttachment] = []
         if let paths = attachments {
             for path in paths {
+                _ = try Self.validateAttachmentSourcePath(path)
                 let attachment = try OutgoingAttachment.fromFile(path: path)
                 outgoingAttachments.append(attachment)
             }
@@ -399,11 +401,80 @@ public actor EmailManager {
 
     // MARK: - Attachments
 
+    /// Validate that a path is safe for writing (no path traversal, stays within allowed directories).
+    private static func validateDestinationPath(_ path: String) throws -> URL {
+        let url = URL(fileURLWithPath: path).standardized
+        let resolved = url.path
+
+        // Must be an absolute path
+        guard resolved.hasPrefix("/") else {
+            throw ClawMailError.invalidParameter("Destination path must be absolute")
+        }
+
+        // Block writing outside user-accessible directories
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let tempDir = NSTemporaryDirectory()
+        let allowed = [
+            home + "/Downloads",
+            home + "/Documents",
+            home + "/Desktop",
+            tempDir,
+        ]
+
+        guard allowed.contains(where: { resolved.hasPrefix($0) }) else {
+            throw ClawMailError.invalidParameter(
+                "Destination path must be within ~/Downloads, ~/Documents, ~/Desktop, or temp directory"
+            )
+        }
+
+        // Reject if the resolved path still contains ".." (shouldn't after standardized, but defense in depth)
+        guard !resolved.contains("..") else {
+            throw ClawMailError.invalidParameter("Path traversal detected in destination path")
+        }
+
+        return url
+    }
+
+    /// Validate that a source path is safe for reading as an attachment.
+    static func validateAttachmentSourcePath(_ path: String) throws -> URL {
+        let url = URL(fileURLWithPath: path).standardized
+        let resolved = url.path
+
+        guard resolved.hasPrefix("/") else {
+            throw ClawMailError.invalidParameter("Attachment path must be absolute")
+        }
+
+        // Block reading from sensitive directories
+        let blocked = [
+            "/etc/", "/var/", "/private/", "/System/", "/Library/",
+            "/usr/", "/bin/", "/sbin/", "/opt/",
+        ]
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let sensitiveHome = [
+            home + "/.ssh", home + "/.gnupg", home + "/.config",
+            home + "/.aws", home + "/Library/Keychains",
+            home + "/Library/Application Support/ClawMail",
+        ]
+
+        let allBlocked = blocked + sensitiveHome
+        guard !allBlocked.contains(where: { resolved.hasPrefix($0) }) else {
+            throw ClawMailError.invalidParameter("Access to this path is restricted for security")
+        }
+
+        guard !resolved.contains("..") else {
+            throw ClawMailError.invalidParameter("Path traversal detected in attachment path")
+        }
+
+        return url
+    }
+
     public func downloadAttachment(
         messageId: String,
         filename: String,
         destinationPath: String
     ) async throws -> (path: String, size: Int) {
+        let url = try Self.validateDestinationPath(destinationPath)
+
         let original = try await readMessage(id: messageId)
         let (_, uid) = try resolveMessageUid(messageId)
 
@@ -418,14 +489,13 @@ public actor EmailManager {
             section: section
         )
 
-        let url = URL(fileURLWithPath: destinationPath)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
         try data.write(to: url)
 
-        return (path: destinationPath, size: data.count)
+        return (path: url.path, size: data.count)
     }
 
     // MARK: - Sync

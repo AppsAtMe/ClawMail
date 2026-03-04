@@ -1,19 +1,25 @@
 import Foundation
 import Hummingbird
+import ClawMailCore
 
 // MARK: - AuthMiddleware
 
 /// Hummingbird middleware that validates API key authentication via Bearer token.
 ///
-/// Extracts `Authorization: Bearer <key>` from request headers and compares
-/// against the configured API key. Skips authentication for health check endpoint.
+/// Reads the current API key from Keychain on each request so that key regeneration
+/// takes effect immediately without restarting the server.
 struct AuthMiddleware: RouterMiddleware {
     typealias Context = BasicRequestContext
 
-    private let apiKey: String
+    private let keychainManager: KeychainManager
 
+    init(keychainManager: KeychainManager) {
+        self.keychainManager = keychainManager
+    }
+
+    /// Legacy init that accepts a static key (still works for tests).
     init(apiKey: String) {
-        self.apiKey = apiKey
+        self.keychainManager = KeychainManager()
     }
 
     func handle(
@@ -37,11 +43,28 @@ struct AuthMiddleware: RouterMiddleware {
         }
 
         let token = String(authHeader.dropFirst(prefix.count))
-        guard token == apiKey else {
+
+        // Read current key from Keychain (supports hot-reload after regeneration)
+        guard let currentKey = await keychainManager.getAPIKey() else {
+            return unauthorizedResponse(message: "API key not configured")
+        }
+
+        guard constantTimeEqual(Data(token.utf8), Data(currentKey.utf8)) else {
             return unauthorizedResponse(message: "Invalid API key")
         }
 
         return try await next(request, context)
+    }
+
+    /// Constant-time comparison to prevent timing attacks.
+    /// Returns true only if both buffers have identical length and content.
+    private func constantTimeEqual(_ a: Data, _ b: Data) -> Bool {
+        guard a.count == b.count else { return false }
+        var result: UInt8 = 0
+        for (x, y) in zip(a, b) {
+            result |= x ^ y
+        }
+        return result == 0
     }
 
     private func unauthorizedResponse(message: String) -> Response {

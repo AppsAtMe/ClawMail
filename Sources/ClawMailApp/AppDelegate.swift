@@ -16,16 +16,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Use a detached task to run async cleanup synchronously-ish
         let state = appState
         let semaphore = DispatchSemaphore(value: 0)
-        Task.detached {
-            await state.apiServer?.stop()
-            await state.ipcServer?.stop()
-            await state.orchestrator?.stop()
-            semaphore.signal()
+        // Dispatch to a global queue to avoid blocking the main actor,
+        // which would deadlock actors that need MainActor isolation.
+        DispatchQueue.global().async {
+            Task.detached {
+                await state.apiServer?.stop()
+                await state.ipcServer?.stop()
+                await state.orchestrator?.stop()
+                semaphore.signal()
+            }
         }
-        semaphore.wait()
+        // Wait with timeout to avoid hanging if shutdown stalls
+        _ = semaphore.wait(timeout: .now() + 4.0)
     }
 
     // MARK: - Service Lifecycle

@@ -23,19 +23,20 @@ enum StatusRoutes {
         // GET /api/v1/accounts — list configured accounts
         router.get("api/v1/accounts") { request, context -> Response in
             let accounts = await orchestrator.listAccounts()
-            let summaries = accounts.map { account in
-                AccountSummary(
-                    label: account.label,
-                    emailAddress: account.emailAddress,
-                    displayName: account.displayName,
-                    isEnabled: account.isEnabled,
-                    connectionStatus: account.connectionStatus,
-                    lastSyncDate: account.lastSyncDate,
-                    hasCalDAV: account.caldavURL != nil,
-                    hasCardDAV: account.carddavURL != nil
-                )
+            return jsonResponse(accounts.map { AccountSummary(from: $0) })
+        }
+
+        // GET /api/v1/accounts/:label/status — per-account status
+        router.get("api/v1/accounts/:label/status") { request, context -> Response in
+            await handleRoute {
+                guard let label = context.parameters.get("label") else {
+                    return badRequestResponse("Missing account label")
+                }
+                guard let account = await orchestrator.getAccount(label: label) else {
+                    throw ClawMailError.accountNotFound(label)
+                }
+                return jsonResponse(AccountSummary(from: account))
             }
-            return jsonResponse(summaries)
         }
     }
 }
@@ -60,4 +61,15 @@ struct AccountSummary: Codable, Sendable {
     var lastSyncDate: Date?
     var hasCalDAV: Bool
     var hasCardDAV: Bool
+
+    init(from account: Account) {
+        self.label = account.label
+        self.emailAddress = account.emailAddress
+        self.displayName = account.displayName
+        self.isEnabled = account.isEnabled
+        self.connectionStatus = account.connectionStatus
+        self.lastSyncDate = account.lastSyncDate
+        self.hasCalDAV = account.caldavURL != nil
+        self.hasCardDAV = account.carddavURL != nil
+    }
 }

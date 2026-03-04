@@ -55,10 +55,11 @@ public actor APIServer {
     private func buildRouter() -> Router<BasicRequestContext> {
         let router = Router()
 
-        // Add auth middleware (skips health check endpoint)
-        if let apiKey = apiKey {
-            router.middlewares.add(AuthMiddleware(apiKey: apiKey))
+        // Require auth middleware — refuse to start without an API key
+        guard let apiKey = apiKey else {
+            preconditionFailure("APIServer requires a non-nil apiKey")
         }
+        router.middlewares.add(AuthMiddleware(apiKey: apiKey))
 
         // Register all route groups
         StatusRoutes.register(on: router, orchestrator: orchestrator)
@@ -219,4 +220,15 @@ func boolQueryParam(_ params: Parameters, _ name: String, default defaultValue: 
         return defaultValue
     }
     return str == "true" || str == "1"
+}
+
+/// Execute a route handler with standardized ClawMailError → HTTP error mapping.
+func handleRoute(_ handler: @Sendable () async throws -> Response) async -> Response {
+    do {
+        return try await handler()
+    } catch let error as ClawMailError {
+        return clawMailErrorResponse(error)
+    } catch {
+        return genericErrorResponse(error)
+    }
 }

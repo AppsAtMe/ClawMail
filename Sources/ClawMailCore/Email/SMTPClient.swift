@@ -397,8 +397,11 @@ public actor SMTPClient {
         guard let channel = channel else {
             throw ClawMailError.connectionError("Not connected to SMTP server")
         }
-        // Dot-stuffing: lines beginning with "." get an extra "." prepended
-        let stuffed = data.replacingOccurrences(of: "\r\n.", with: "\r\n..")
+        // Dot-stuffing per RFC 5321: lines beginning with "." get an extra "." prepended
+        var stuffed = data.replacingOccurrences(of: "\r\n.", with: "\r\n..")
+        if stuffed.hasPrefix(".") {
+            stuffed = "." + stuffed
+        }
         var buffer = channel.allocator.buffer(capacity: stuffed.utf8.count)
         buffer.writeString(stuffed)
         try await channel.writeAndFlush(buffer)
@@ -451,8 +454,16 @@ private final class SMTPLineHandler: ByteToMessageDecoder, Sendable {
     typealias InboundOut = String
 
     func decode(context: ChannelHandlerContext, buffer: inout ByteBuffer) throws -> DecodingState {
-        guard let line = buffer.readString(length: buffer.readableBytes) else {
+        guard let crlfIndex = buffer.readableBytesView.firstIndex(of: UInt8(ascii: "\n")) else {
             return .needMoreData
+        }
+        let length = crlfIndex - buffer.readableBytesView.startIndex
+        guard var line = buffer.readString(length: length) else {
+            return .needMoreData
+        }
+        buffer.moveReaderIndex(forwardBy: 1) // consume the \n
+        if line.hasSuffix("\r") {
+            line = String(line.dropLast())
         }
         context.fireChannelRead(wrapInboundOut(line))
         return .continue
@@ -463,28 +474,22 @@ private final class SMTPResponseHandler: ChannelInboundHandler, @unchecked Senda
     typealias InboundIn = String
 
     private let queue: SMTPResponseQueue
-    private var buffer = ""
 
     init(queue: SMTPResponseQueue) {
         self.queue = queue
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        let text = unwrapInboundIn(data)
-        buffer += text
+        let line = unwrapInboundIn(data)
 
-        while let range = buffer.range(of: "\r\n") {
-            let line = String(buffer[buffer.startIndex..<range.lowerBound])
-            buffer = String(buffer[range.upperBound...])
-
-            if line.count >= 3, let code = Int(line.prefix(3)) {
-                let message = line.count > 4 ? String(line.dropFirst(4)) : ""
-                if line.count > 3 && line[line.index(line.startIndex, offsetBy: 3)] == "-" {
-                    continue // Multi-line response continuation
-                }
-                let response = SMTPResponse(code: code, message: message)
-                Task { await self.queue.enqueue(response) }
+        if line.count >= 3, let code = Int(line.prefix(3)) {
+            let message = line.count > 4 ? String(line.dropFirst(4)) : ""
+            // Multi-line continuation: 4th char is "-"
+            if line.count > 3 && line[line.index(line.startIndex, offsetBy: 3)] == "-" {
+                return
             }
+            let response = SMTPResponse(code: code, message: message)
+            Task { await self.queue.enqueue(response) }
         }
     }
 }

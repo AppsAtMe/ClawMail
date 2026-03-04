@@ -54,7 +54,7 @@ public final class IPCServer: Sendable {
         let handler = IPCServerHandler(orchestrator: orchestrator, server: self)
 
         let bootstrap = ServerBootstrap(group: group)
-            .serverChannelOption(.backlog, value: 1)
+            .serverChannelOption(.backlog, value: 8)
             .childChannelInitializer { channel in
                 channel.pipeline.addHandler(ByteToMessageHandler(NewlineFrameDecoder())).flatMap {
                     channel.pipeline.addHandler(handler)

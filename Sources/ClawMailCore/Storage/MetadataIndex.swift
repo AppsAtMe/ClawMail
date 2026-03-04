@@ -17,6 +17,24 @@ public final class MetadataIndex: Sendable {
                 summary.cc.map { ["name": $0.name ?? "", "email": $0.email, "type": "cc"] }
             )
             let flagsJSON = try JSONEncoder().encode(summary.flags.map(\.rawValue))
+            let recipientsStr = String(data: recipientsJSON, encoding: .utf8) ?? "[]"
+            let flagsStr = String(data: flagsJSON, encoding: .utf8) ?? "[]"
+
+            // When we have body text, clean up old FTS entry before replacing
+            // the metadata row (INSERT OR REPLACE changes the rowid, orphaning old FTS)
+            if bodyText != nil {
+                let oldRowid = try Int64.fetchOne(
+                    db,
+                    sql: "SELECT rowid FROM message_metadata WHERE id = ? AND account_label = ?",
+                    arguments: [summary.id, summary.account]
+                )
+                if let oldRowid = oldRowid {
+                    try db.execute(
+                        sql: "DELETE FROM message_fts WHERE rowid = ?",
+                        arguments: [oldRowid]
+                    )
+                }
+            }
 
             try db.execute(
                 sql: """
@@ -31,22 +49,22 @@ public final class MetadataIndex: Sendable {
                     summary.folder,
                     summary.from.name,
                     summary.from.email,
-                    String(data: recipientsJSON, encoding: .utf8)!,
+                    recipientsStr,
                     summary.subject,
                     summary.date,
-                    String(data: flagsJSON, encoding: .utf8)!,
+                    flagsStr,
                     summary.size,
                     summary.hasAttachments,
                     summary.uid.map { Int64($0) },
                 ]
             )
 
-            // Update FTS index
+            // Insert new FTS entry with the new rowid
             if let bodyText = bodyText {
                 let rowid = db.lastInsertedRowID
                 try db.execute(
                     sql: """
-                        INSERT OR REPLACE INTO message_fts(rowid, subject, body_text, sender_email, sender_name)
+                        INSERT INTO message_fts(rowid, subject, body_text, sender_email, sender_name)
                         VALUES (?, ?, ?, ?, ?)
                     """,
                     arguments: [rowid, summary.subject, bodyText, summary.from.email, summary.from.name]
@@ -107,13 +125,17 @@ public final class MetadataIndex: Sendable {
         limit: Int = 20,
         offset: Int = 0
     ) throws -> [EmailSummary] {
-        try db.read { db in
+        // Sanitize the FTS5 query: wrap in double quotes to treat as phrase search
+        // if it contains FTS5 operators or unbalanced quotes that would cause errors.
+        let sanitizedQuery = Self.sanitizeFTS5Query(query)
+
+        return try db.read { db in
             var sql = """
                 SELECT m.* FROM message_metadata m
                 JOIN message_fts f ON m.rowid = f.rowid
                 WHERE f.message_fts MATCH ? AND m.account_label = ?
             """
-            var args: [DatabaseValueConvertible?] = [query, account]
+            var args: [DatabaseValueConvertible?] = [sanitizedQuery, account]
 
             if let folder = folder {
                 sql += " AND m.folder = ?"
@@ -252,6 +274,23 @@ public final class MetadataIndex: Sendable {
     }
 
     // MARK: - Row Mapping
+
+    /// Sanitize a search query for FTS5. If the query contains unbalanced quotes
+    /// or FTS5 operators that would cause a parse error, wrap it as a phrase search.
+    static func sanitizeFTS5Query(_ query: String) -> String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "\"\"" }
+
+        // Check for unbalanced double quotes
+        let quoteCount = trimmed.filter { $0 == "\"" }.count
+        if quoteCount % 2 != 0 {
+            // Unbalanced quotes — escape the whole thing as a phrase
+            let escaped = trimmed.replacingOccurrences(of: "\"", with: "\"\"")
+            return "\"\(escaped)\""
+        }
+
+        return trimmed
+    }
 
     private static func summaryFromRow(_ row: Row) throws -> EmailSummary {
         let flagStrings = try JSONDecoder().decode([String].self, from: (row["flags_json"] as String).data(using: .utf8)!)

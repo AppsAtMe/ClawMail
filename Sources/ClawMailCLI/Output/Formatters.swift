@@ -3,10 +3,11 @@ import ClawMailCore
 
 // MARK: - OutputFormat
 
-/// Output format for CLI commands: JSON (default, agent-friendly) or text (human-readable).
+/// Output format for CLI commands: JSON (default, agent-friendly), text (human-readable), or CSV.
 public enum OutputFormat: String, CaseIterable, Sendable, ExpressibleByArgument {
     case json
     case text
+    case csv
 
     public init?(argument: String) {
         self.init(rawValue: argument.lowercased())
@@ -28,6 +29,8 @@ public enum OutputFormatter {
             return formatJSON(value)
         case .text:
             return formatText(value)
+        case .csv:
+            return formatCSV(value)
         }
     }
 
@@ -89,6 +92,64 @@ public enum OutputFormatter {
             return separator + formatText(item, indent: indent)
         default:
             return "\(prefix)- \(formatText(item))"
+        }
+    }
+
+    // MARK: - CSV Formatting
+
+    /// Format as CSV. Works best with arrays of dictionaries (tabular data).
+    public static func formatCSV(_ value: AnyCodableValue) -> String {
+        guard case .array(let items) = value else {
+            // Non-array: fall back to a single-value CSV
+            return csvEscape(formatText(value))
+        }
+
+        // Collect all unique keys across all dictionary items for the header row
+        var allKeys: [String] = []
+        var keySet = Set<String>()
+        for item in items {
+            if case .dictionary(let dict) = item {
+                for key in dict.keys.sorted() where !keySet.contains(key) {
+                    allKeys.append(key)
+                    keySet.insert(key)
+                }
+            }
+        }
+
+        guard !allKeys.isEmpty else {
+            return items.map { formatText($0) }.joined(separator: "\n")
+        }
+
+        var lines: [String] = []
+        lines.append(allKeys.joined(separator: ","))
+
+        for item in items {
+            if case .dictionary(let dict) = item {
+                let row = allKeys.map { key in
+                    csvEscape(flatValue(dict[key] ?? .null))
+                }
+                lines.append(row.joined(separator: ","))
+            }
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private static func csvEscape(_ value: String) -> String {
+        if value.contains(",") || value.contains("\"") || value.contains("\n") {
+            return "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+        }
+        return value
+    }
+
+    private static func flatValue(_ value: AnyCodableValue) -> String {
+        switch value {
+        case .string(let s): return s
+        case .int(let i): return "\(i)"
+        case .double(let d): return "\(d)"
+        case .bool(let b): return b ? "true" : "false"
+        case .null: return ""
+        case .array, .dictionary: return formatJSON(value)
         }
     }
 

@@ -84,15 +84,12 @@ final class MCPServer: Sendable {
             Self.log("Warning: Could not connect to daemon: \(error). Will attempt on first request.")
         }
 
-        // Forward IPC notifications to MCP stdout
+        // Forward IPC notifications to MCP stdout with clawmail/ prefix
         ipcClient.onNotification = { [writer] notification in
             Task {
                 let mcpNotification = JSONRPCNotification(
-                    method: "notifications/message",
-                    params: [
-                        "level": .string("info"),
-                        "data": .string("IPC: \(notification.method)"),
-                    ]
+                    method: "clawmail/\(notification.method)",
+                    params: notification.params
                 )
                 await writer.write(mcpNotification)
             }

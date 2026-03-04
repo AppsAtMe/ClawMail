@@ -81,8 +81,7 @@ public actor IMAPIdleMonitor {
         _ = try await client.selectFolder(monitoredFolder)
 
         // Start the IDLE loop in a background task.
-        idleTask = Task { [weak self] in
-            guard let self = self else { return }
+        idleTask = Task {
             await self.idleLoop()
         }
     }

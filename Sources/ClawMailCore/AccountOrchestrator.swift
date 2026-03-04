@@ -50,13 +50,11 @@ public actor AccountOrchestrator {
 
     // MARK: - Lifecycle
 
-    /// Load config, open database, connect all enabled accounts, start sync.
     public func start() async throws {
         for account in config.accounts where account.isEnabled {
             try await connectAccount(account)
         }
 
-        // Start sync scheduler
         var engines: [String: SyncEngine] = [:]
         for (label, conn) in connections {
             engines[label] = conn.syncEngine
@@ -67,7 +65,6 @@ public actor AccountOrchestrator {
         )
     }
 
-    /// Disconnect all accounts, stop scheduler, close database.
     public func stop() async {
         await syncScheduler.stop()
         for (_, conn) in connections {
@@ -143,51 +140,48 @@ public actor AccountOrchestrator {
     public func sendMessage(_ request: SendEmailRequest) async throws -> String {
         let mgr = try emailManager(for: request.account)
 
-        // Guardrail check
-        let guardrailResult = try await guardrailEngine.checkSend(
+        try await enforceGuardrails(
             account: request.account,
             recipients: request.to + (request.cc ?? []) + (request.bcc ?? [])
         )
-        switch guardrailResult {
-        case .allowed: break
-        case .blocked(let error): throw error
-        case .pendingApproval(let emails): throw ClawMailError.recipientPendingApproval(emails: emails)
-        }
 
-        // Send
         let messageId = try await mgr.sendMessage(request)
 
-        // Audit
-        try auditLog.log(entry: AuditEntry(
-            interface: agentInterface ?? .cli,
+        try auditSuccess(
             operation: "email.send",
             account: request.account,
             parameters: [
                 "to": .string(request.to.map(\.email).joined(separator: ", ")),
                 "subject": .string(request.subject),
             ],
-            result: .success,
             details: ["messageId": .string(messageId)]
-        ))
+        )
 
         return messageId
     }
 
     public func replyToMessage(_ request: ReplyEmailRequest) async throws -> String {
         let mgr = try emailManager(for: request.account)
+
+        // Read original to get recipients for guardrail check
+        let original = try await mgr.readMessage(id: request.originalMessageId)
+        var recipients = [original.from]
+        if request.replyAll {
+            recipients += original.to + original.cc
+        }
+        try await enforceGuardrails(account: request.account, recipients: recipients)
+
         let messageId = try await mgr.replyToMessage(request)
 
-        try auditLog.log(entry: AuditEntry(
-            interface: agentInterface ?? .cli,
+        try auditSuccess(
             operation: "email.reply",
             account: request.account,
             parameters: [
                 "originalMessageId": .string(request.originalMessageId),
                 "replyAll": .bool(request.replyAll),
             ],
-            result: .success,
             details: ["messageId": .string(messageId)]
-        ))
+        )
 
         return messageId
     }
@@ -195,15 +189,7 @@ public actor AccountOrchestrator {
     public func forwardMessage(_ request: ForwardEmailRequest) async throws -> String {
         let mgr = try emailManager(for: request.account)
 
-        let guardrailResult = try await guardrailEngine.checkSend(
-            account: request.account,
-            recipients: request.to
-        )
-        switch guardrailResult {
-        case .allowed: break
-        case .blocked(let error): throw error
-        case .pendingApproval(let emails): throw ClawMailError.recipientPendingApproval(emails: emails)
-        }
+        try await enforceGuardrails(account: request.account, recipients: request.to)
 
         let messageId = try await mgr.forwardMessage(
             messageId: request.originalMessageId,
@@ -212,17 +198,15 @@ public actor AccountOrchestrator {
             attachments: request.attachments
         )
 
-        try auditLog.log(entry: AuditEntry(
-            interface: agentInterface ?? .cli,
+        try auditSuccess(
             operation: "email.forward",
             account: request.account,
             parameters: [
                 "originalMessageId": .string(request.originalMessageId),
                 "to": .string(request.to.map(\.email).joined(separator: ", ")),
             ],
-            result: .success,
             details: ["messageId": .string(messageId)]
-        ))
+        )
 
         return messageId
     }
@@ -231,31 +215,37 @@ public actor AccountOrchestrator {
         let mgr = try emailManager(for: account)
         try await mgr.moveMessage(id: id, to: folder)
 
-        try auditLog.log(entry: AuditEntry(
-            interface: agentInterface ?? .cli,
+        try auditSuccess(
             operation: "email.move",
             account: account,
-            parameters: ["messageId": .string(id), "destination": .string(folder)],
-            result: .success
-        ))
+            parameters: ["messageId": .string(id), "destination": .string(folder)]
+        )
     }
 
     public func deleteMessage(account: String, id: String, permanent: Bool = false) async throws {
         let mgr = try emailManager(for: account)
         try await mgr.deleteMessage(id: id, permanent: permanent)
 
-        try auditLog.log(entry: AuditEntry(
-            interface: agentInterface ?? .cli,
+        try auditSuccess(
             operation: "email.delete",
             account: account,
-            parameters: ["messageId": .string(id), "permanent": .bool(permanent)],
-            result: .success
-        ))
+            parameters: ["messageId": .string(id), "permanent": .bool(permanent)]
+        )
     }
 
     public func updateFlags(account: String, id: String, add: [EmailFlag] = [], remove: [EmailFlag] = []) async throws {
         let mgr = try emailManager(for: account)
         try await mgr.updateFlags(id: id, add: add, remove: remove)
+
+        try auditSuccess(
+            operation: "email.updateFlags",
+            account: account,
+            parameters: [
+                "messageId": .string(id),
+                "add": .string(add.map(\.rawValue).joined(separator: ", ")),
+                "remove": .string(remove.map(\.rawValue).joined(separator: ", ")),
+            ]
+        )
     }
 
     public func searchMessages(
@@ -277,11 +267,23 @@ public actor AccountOrchestrator {
     public func createFolder(account: String, name: String, parent: String? = nil) async throws {
         let mgr = try emailManager(for: account)
         try await mgr.createFolder(name: name, parent: parent)
+
+        try auditSuccess(
+            operation: "email.createFolder",
+            account: account,
+            parameters: ["name": .string(name)]
+        )
     }
 
     public func deleteFolder(account: String, path: String) async throws {
         let mgr = try emailManager(for: account)
         try await mgr.deleteFolder(path: path)
+
+        try auditSuccess(
+            operation: "email.deleteFolder",
+            account: account,
+            parameters: ["path": .string(path)]
+        )
     }
 
     public func downloadAttachment(account: String, messageId: String, filename: String, path: String) async throws -> (path: String, size: Int) {
@@ -305,25 +307,37 @@ public actor AccountOrchestrator {
         let mgr = try calendarManager(for: account)
         let event = try await mgr.createEvent(request)
 
-        try auditLog.log(entry: AuditEntry(
-            interface: agentInterface ?? .cli,
-            operation: "calendar.create_event",
+        try auditSuccess(
+            operation: "calendar.createEvent",
             account: account,
-            parameters: ["title": .string(request.title)],
-            result: .success
-        ))
+            parameters: ["title": .string(request.title)]
+        )
 
         return event
     }
 
     public func updateEvent(account: String, id: String, _ request: UpdateEventRequest) async throws -> CalendarEvent {
         let mgr = try calendarManager(for: account)
-        return try await mgr.updateEvent(id: id, request)
+        let event = try await mgr.updateEvent(id: id, request)
+
+        try auditSuccess(
+            operation: "calendar.updateEvent",
+            account: account,
+            parameters: ["id": .string(id)]
+        )
+
+        return event
     }
 
     public func deleteEvent(account: String, id: String) async throws {
         let mgr = try calendarManager(for: account)
         try await mgr.deleteEvent(id: id)
+
+        try auditSuccess(
+            operation: "calendar.deleteEvent",
+            account: account,
+            parameters: ["id": .string(id)]
+        )
     }
 
     // MARK: - Contact Operations
@@ -340,17 +354,39 @@ public actor AccountOrchestrator {
 
     public func createContact(account: String, _ request: CreateContactRequest) async throws -> Contact {
         let mgr = try contactsManager(for: account)
-        return try await mgr.createContact(request)
+        let contact = try await mgr.createContact(request)
+
+        try auditSuccess(
+            operation: "contacts.create",
+            account: account,
+            parameters: ["displayName": .string(request.displayName ?? "")]
+        )
+
+        return contact
     }
 
     public func updateContact(account: String, id: String, _ request: UpdateContactRequest) async throws -> Contact {
         let mgr = try contactsManager(for: account)
-        return try await mgr.updateContact(id: id, request)
+        let contact = try await mgr.updateContact(id: id, request)
+
+        try auditSuccess(
+            operation: "contacts.update",
+            account: account,
+            parameters: ["id": .string(id)]
+        )
+
+        return contact
     }
 
     public func deleteContact(account: String, id: String) async throws {
         let mgr = try contactsManager(for: account)
         try await mgr.deleteContact(id: id)
+
+        try auditSuccess(
+            operation: "contacts.delete",
+            account: account,
+            parameters: ["id": .string(id)]
+        )
     }
 
     // MARK: - Task Operations
@@ -367,17 +403,39 @@ public actor AccountOrchestrator {
 
     public func createTask(account: String, _ request: CreateTaskRequest) async throws -> TaskItem {
         let mgr = try taskManager(for: account)
-        return try await mgr.createTask(request)
+        let task = try await mgr.createTask(request)
+
+        try auditSuccess(
+            operation: "tasks.create",
+            account: account,
+            parameters: ["title": .string(request.title)]
+        )
+
+        return task
     }
 
     public func updateTask(account: String, id: String, _ request: UpdateTaskRequest) async throws -> TaskItem {
         let mgr = try taskManager(for: account)
-        return try await mgr.updateTask(id: id, request)
+        let task = try await mgr.updateTask(id: id, request)
+
+        try auditSuccess(
+            operation: "tasks.update",
+            account: account,
+            parameters: ["id": .string(id)]
+        )
+
+        return task
     }
 
     public func deleteTask(account: String, id: String) async throws {
         let mgr = try taskManager(for: account)
         try await mgr.deleteTask(id: id)
+
+        try auditSuccess(
+            operation: "tasks.delete",
+            account: account,
+            parameters: ["id": .string(id)]
+        )
     }
 
     // MARK: - Audit
@@ -400,8 +458,6 @@ public actor AccountOrchestrator {
         try metadataIndex.removeApprovedRecipient(email: email)
     }
 
-    // MARK: - Pending Approvals
-
     public func approvePendingRecipients(emails: [String], account: String) throws {
         for email in emails {
             try metadataIndex.approveRecipient(email: email, account: account)
@@ -410,16 +466,35 @@ public actor AccountOrchestrator {
 
     // MARK: - Internal Helpers
 
+    private func enforceGuardrails(account: String, recipients: [EmailAddress]) async throws {
+        let result = try await guardrailEngine.checkSend(account: account, recipients: recipients)
+        switch result {
+        case .allowed: break
+        case .blocked(let error): throw error
+        case .pendingApproval(let emails): throw ClawMailError.recipientPendingApproval(emails: emails)
+        }
+    }
+
+    private func auditSuccess(
+        operation: String,
+        account: String,
+        parameters: [String: AnyCodableValue],
+        details: [String: AnyCodableValue]? = nil
+    ) throws {
+        try auditLog.log(entry: AuditEntry(
+            interface: agentInterface ?? .cli,
+            operation: operation,
+            account: account,
+            parameters: parameters,
+            result: .success,
+            details: details
+        ))
+    }
+
     private func connectAccount(_ account: Account) async throws {
         let credentials = try await credentialStore.credentialsFor(account: account)
 
-        let imapCredential: IMAPCredential
-        switch credentials {
-        case .password(let password):
-            imapCredential = .password(username: account.emailAddress, password: password)
-        case .oauth2(let accessToken, _, _):
-            imapCredential = .oauth2(username: account.emailAddress, accessToken: accessToken)
-        }
+        let imapCredential = credentials.imapCredential(username: account.emailAddress)
 
         let imapClient = IMAPClient(
             host: account.imapHost,
@@ -445,34 +520,25 @@ public actor AccountOrchestrator {
 
         try await emailManager.connect()
 
-        // Set up CalDAV/CardDAV if configured
         var calMgr: CalendarManager? = nil
         var contactsMgr: ContactsManager? = nil
         var taskMgr: TaskManager? = nil
 
         if let caldavURL = account.caldavURL {
-            let caldavCred: CalDAVCredential
-            switch credentials {
-            case .password(let password):
-                caldavCred = .password(username: account.emailAddress, password: password)
-            case .oauth2(let accessToken, _, _):
-                caldavCred = .oauthToken(accessToken)
-            }
-            let caldavClient = CalDAVClient(baseURL: caldavURL, credential: caldavCred)
+            let caldavClient = CalDAVClient(
+                baseURL: caldavURL,
+                credential: credentials.calDAVCredential(username: account.emailAddress)
+            )
             try await caldavClient.authenticate()
             calMgr = CalendarManager(client: caldavClient)
             taskMgr = TaskManager(client: caldavClient)
         }
 
         if let carddavURL = account.carddavURL {
-            let carddavCred: CardDAVCredential
-            switch credentials {
-            case .password(let password):
-                carddavCred = .password(username: account.emailAddress, password: password)
-            case .oauth2(let accessToken, _, _):
-                carddavCred = .oauthToken(accessToken)
-            }
-            let carddavClient = CardDAVClient(baseURL: carddavURL, credential: carddavCred)
+            let carddavClient = CardDAVClient(
+                baseURL: carddavURL,
+                credential: credentials.cardDAVCredential(username: account.emailAddress)
+            )
             try await carddavClient.authenticate()
             contactsMgr = ContactsManager(client: carddavClient)
         }
@@ -484,7 +550,6 @@ public actor AccountOrchestrator {
             accountLabel: account.label
         )
 
-        // Set up IDLE callback
         let newMailCallback = onNewMail
         let sEngine = syncEngine
         try await idleMonitor.start(
@@ -509,40 +574,69 @@ public actor AccountOrchestrator {
         )
     }
 
-    private func emailManager(for account: String) throws -> EmailManager {
+    private func requireConnection(for account: String) throws -> AccountConnection {
         guard let conn = connections[account] else {
             throw ClawMailError.accountNotFound(account)
         }
-        return conn.emailManager
+        return conn
+    }
+
+    private func emailManager(for account: String) throws -> EmailManager {
+        try requireConnection(for: account).emailManager
+    }
+
+    private func requireManager<T>(
+        for account: String,
+        keyPath: KeyPath<AccountConnection, T?>,
+        unavailableError: ClawMailError
+    ) throws -> T {
+        let conn = try requireConnection(for: account)
+        guard let mgr = conn[keyPath: keyPath] else {
+            throw unavailableError
+        }
+        return mgr
     }
 
     private func calendarManager(for account: String) throws -> CalendarManager {
-        guard let conn = connections[account] else {
-            throw ClawMailError.accountNotFound(account)
-        }
-        guard let mgr = conn.calendarManager else {
-            throw ClawMailError.calendarNotAvailable
-        }
-        return mgr
+        try requireManager(for: account, keyPath: \.calendarManager, unavailableError: .calendarNotAvailable)
     }
 
     private func contactsManager(for account: String) throws -> ContactsManager {
-        guard let conn = connections[account] else {
-            throw ClawMailError.accountNotFound(account)
-        }
-        guard let mgr = conn.contactsManager else {
-            throw ClawMailError.contactsNotAvailable
-        }
-        return mgr
+        try requireManager(for: account, keyPath: \.contactsManager, unavailableError: .contactsNotAvailable)
     }
 
     private func taskManager(for account: String) throws -> TaskManager {
-        guard let conn = connections[account] else {
-            throw ClawMailError.accountNotFound(account)
+        try requireManager(for: account, keyPath: \.taskManager, unavailableError: .tasksNotAvailable)
+    }
+}
+
+// MARK: - Credential Conversion Helpers
+
+extension Credentials {
+    func imapCredential(username: String) -> IMAPCredential {
+        switch self {
+        case .password(let password):
+            return .password(username: username, password: password)
+        case .oauth2(let accessToken, _, _):
+            return .oauth2(username: username, accessToken: accessToken)
         }
-        guard let mgr = conn.taskManager else {
-            throw ClawMailError.tasksNotAvailable
+    }
+
+    func calDAVCredential(username: String) -> CalDAVCredential {
+        switch self {
+        case .password(let password):
+            return .password(username: username, password: password)
+        case .oauth2(let accessToken, _, _):
+            return .oauthToken(accessToken)
         }
-        return mgr
+    }
+
+    func cardDAVCredential(username: String) -> CardDAVCredential {
+        switch self {
+        case .password(let password):
+            return .password(username: username, password: password)
+        case .oauth2(let accessToken, _, _):
+            return .oauthToken(accessToken)
+        }
     }
 }

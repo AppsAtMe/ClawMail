@@ -47,6 +47,8 @@ public struct OAuthConfig: Sendable {
 // MARK: - OAuth2Manager
 
 public actor OAuth2Manager {
+    private static let formSafeChars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+
     private let keychainManager: KeychainManager
     private var configs: [OAuthProvider: OAuthConfig] = [:]
 
@@ -177,7 +179,7 @@ public actor OAuth2Manager {
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
         let bodyString = body.map { key, value in
-            "\(key)=\(value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value)"
+            "\(key)=\(value.addingPercentEncoding(withAllowedCharacters: Self.formSafeChars) ?? value)"
         }.joined(separator: "&")
         request.httpBody = bodyString.data(using: .utf8)
 

@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - ClawMailError
 
-public enum ClawMailError: Error, Codable, Sendable {
+public enum ClawMailError: Error, LocalizedError, Codable, Sendable {
     case accountNotFound(String)
     case accountDisconnected(String)
     case authFailed(String)
@@ -40,6 +40,8 @@ public enum ClawMailError: Error, Codable, Sendable {
         case .daemonNotRunning: return "DAEMON_NOT_RUNNING"
         }
     }
+
+    public var errorDescription: String? { message }
 
     public var message: String {
         switch self {

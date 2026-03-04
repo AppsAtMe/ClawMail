@@ -318,7 +318,8 @@ private final class IMAPResponseHandler: ChannelInboundHandler, @unchecked Senda
 
     func errorCaught(context: ChannelHandlerContext, error: any Error) {
         let queue = lineQueue
-        Task { await queue.close(error: ClawMailError.connectionError(error.localizedDescription)) }
+        let desc = String(describing: error)
+        Task { await queue.close(error: ClawMailError.connectionError("IMAP: \(desc)")) }
         context.close(promise: nil)
     }
 }
@@ -393,12 +394,15 @@ public actor IMAPClient {
         if useTLS {
             var config = TLSConfiguration.makeClientConfiguration()
             config.certificateVerification = .fullVerification
+            // Use the system certificate store (macOS Keychain) for trust evaluation
+            config.trustRoots = .default
             sslContext = try NIOSSLContext(configuration: config)
         } else {
             sslContext = nil
         }
 
         let bootstrap = ClientBootstrap(group: group)
+            .connectTimeout(.seconds(15))
             .channelOption(.socketOption(.so_reuseaddr), value: 1)
             .channelInitializer { channel in
                 var handlers: [any ChannelHandler] = []
@@ -433,7 +437,7 @@ public actor IMAPClient {
         } catch let error as ClawMailError {
             throw error
         } catch {
-            throw ClawMailError.connectionError(error.localizedDescription)
+            throw ClawMailError.connectionError(String(describing: error))
         }
     }
 
@@ -448,6 +452,7 @@ public actor IMAPClient {
 
         var config = TLSConfiguration.makeClientConfiguration()
         config.certificateVerification = .fullVerification
+        config.trustRoots = .default
         let sslContext = try NIOSSLContext(configuration: config)
         let sslHandler = try NIOSSLClientHandler(context: sslContext, serverHostname: host)
 

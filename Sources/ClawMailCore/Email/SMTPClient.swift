@@ -118,53 +118,85 @@ public actor SMTPClient {
 
         let queue: SMTPResponseQueue = responseQueue
         let smtpHost: String = host
+        let useSSL = (security == .ssl)
+
+        // For implicit SSL (port 465), the SSL handler must be in the pipeline
+        // BEFORE the TCP connection completes. Otherwise the server's TLS ServerHello
+        // arrives before we have a handler to process it.
+        let sslContext: NIOSSLContext?
+        if useSSL {
+            var config = TLSConfiguration.makeClientConfiguration()
+            config.trustRoots = .default
+            sslContext = try NIOSSLContext(configuration: config)
+        } else {
+            sslContext = nil
+        }
 
         let bootstrap = ClientBootstrap(group: group)
+            .connectTimeout(.seconds(15))
             .channelOption(.socketOption(.so_reuseaddr), value: 1)
-
-        let channel = try await bootstrap.connect(host: smtpHost, port: port).get()
-        self.channel = channel
-
-        // Add handlers after connection
-        if security == .ssl {
-            let sslContext = try NIOSSLContext(configuration: .makeClientConfiguration())
-            let sslHandler = try NIOSSLClientHandler(context: sslContext, serverHostname: smtpHost)
-            try await channel.pipeline.addHandler(sslHandler).get()
-        }
-        try await channel.pipeline.addHandler(ByteToMessageHandler(SMTPLineHandler())).get()
-        try await channel.pipeline.addHandler(SMTPResponseHandler(queue: queue)).get()
-
-        // Read server greeting
-        let greeting = try await readResponse()
-        guard greeting.code == 220 else {
-            throw ClawMailError.connectionError("SMTP server rejected connection: \(greeting.message)")
-        }
-
-        // EHLO
-        try await sendCommand("EHLO clawmail.local")
-        let ehloResponse = try await readResponse()
-        guard ehloResponse.code == 250 else {
-            throw ClawMailError.connectionError("EHLO failed: \(ehloResponse.message)")
-        }
-
-        // STARTTLS if needed
-        if security == .starttls {
-            try await sendCommand("STARTTLS")
-            let starttlsResponse = try await readResponse()
-            guard starttlsResponse.code == 220 else {
-                throw ClawMailError.connectionError("STARTTLS failed: \(starttlsResponse.message)")
+            .channelInitializer { channel in
+                // Build pipeline: [SSL (optional)] → LineDecoder → ResponseHandler
+                let addSSL: EventLoopFuture<Void>
+                if let ctx = sslContext {
+                    do {
+                        let sslHandler = try NIOSSLClientHandler(context: ctx, serverHostname: smtpHost)
+                        addSSL = channel.pipeline.addHandler(sslHandler)
+                    } catch {
+                        return channel.eventLoop.makeFailedFuture(error)
+                    }
+                } else {
+                    addSSL = channel.eventLoop.makeSucceededVoidFuture()
+                }
+                return addSSL.flatMap {
+                    channel.pipeline.addHandler(ByteToMessageHandler(SMTPLineHandler()))
+                }.flatMap {
+                    channel.pipeline.addHandler(SMTPResponseHandler(queue: queue))
+                }
             }
-            let sslContext = try NIOSSLContext(configuration: .makeClientConfiguration())
-            let sslHandler = try NIOSSLClientHandler(context: sslContext, serverHostname: host)
-            try await channel.pipeline.addHandler(sslHandler).get()
 
-            // Re-EHLO after STARTTLS
+        do {
+            let channel = try await bootstrap.connect(host: smtpHost, port: port).get()
+            self.channel = channel
+
+            // Read server greeting
+            let greeting = try await readResponse()
+            guard greeting.code == 220 else {
+                throw ClawMailError.connectionError("SMTP server rejected connection: \(greeting.message)")
+            }
+
+            // EHLO
             try await sendCommand("EHLO clawmail.local")
-            let _ = try await readResponse()
-        }
+            let ehloResponse = try await readResponse()
+            guard ehloResponse.code == 250 else {
+                throw ClawMailError.connectionError("EHLO failed: \(ehloResponse.message)")
+            }
 
-        // Authenticate
-        try await authenticate()
+            // STARTTLS if needed
+            if security == .starttls {
+                try await sendCommand("STARTTLS")
+                let starttlsResponse = try await readResponse()
+                guard starttlsResponse.code == 220 else {
+                    throw ClawMailError.connectionError("STARTTLS failed: \(starttlsResponse.message)")
+                }
+                var starttlsConfig = TLSConfiguration.makeClientConfiguration()
+                starttlsConfig.trustRoots = .default
+                let tlsContext = try NIOSSLContext(configuration: starttlsConfig)
+                let sslHandler = try NIOSSLClientHandler(context: tlsContext, serverHostname: host)
+                try await channel.pipeline.addHandler(sslHandler, position: .first).get()
+
+                // Re-EHLO after STARTTLS
+                try await sendCommand("EHLO clawmail.local")
+                let _ = try await readResponse()
+            }
+
+            // Authenticate
+            try await authenticate()
+        } catch let error as ClawMailError {
+            throw error
+        } catch {
+            throw ClawMailError.connectionError("SMTP: \(String(describing: error))")
+        }
     }
 
     private func authenticate() async throws {
@@ -426,7 +458,7 @@ public actor SMTPClient {
         guard channel != nil else {
             throw ClawMailError.connectionError("Not connected to SMTP server")
         }
-        return await responseQueue.getNextResponse()
+        return try await responseQueue.getNextResponse()
     }
 }
 
@@ -441,7 +473,8 @@ struct SMTPResponse: Sendable {
 
 actor SMTPResponseQueue {
     private var responses: [SMTPResponse] = []
-    private var waiters: [CheckedContinuation<SMTPResponse, Never>] = []
+    private var waiters: [CheckedContinuation<SMTPResponse, any Error>] = []
+    private var closedError: (any Error)?
 
     func enqueue(_ response: SMTPResponse) {
         if let waiter = waiters.first {
@@ -452,13 +485,29 @@ actor SMTPResponseQueue {
         }
     }
 
-    func getNextResponse() async -> SMTPResponse {
+    func close(error: any Error) {
+        closedError = error
+        let pendingWaiters = waiters
+        waiters.removeAll()
+        for waiter in pendingWaiters {
+            waiter.resume(throwing: error)
+        }
+    }
+
+    func getNextResponse() async throws -> SMTPResponse {
+        if let error = closedError {
+            throw error
+        }
         if let response = responses.first {
             responses.removeFirst()
             return response
         }
-        return await withCheckedContinuation { continuation in
-            waiters.append(continuation)
+        return try await withCheckedThrowingContinuation { continuation in
+            if let error = closedError {
+                continuation.resume(throwing: error)
+            } else {
+                waiters.append(continuation)
+            }
         }
     }
 }
@@ -506,5 +555,17 @@ private final class SMTPResponseHandler: ChannelInboundHandler, @unchecked Senda
             let response = SMTPResponse(code: code, message: message)
             Task { await self.queue.enqueue(response) }
         }
+    }
+
+    func channelInactive(context: ChannelHandlerContext) {
+        let queue = self.queue
+        Task { await queue.close(error: ClawMailError.connectionError("Connection closed by server")) }
+    }
+
+    func errorCaught(context: ChannelHandlerContext, error: any Error) {
+        let queue = self.queue
+        let desc = String(describing: error)
+        Task { await queue.close(error: ClawMailError.connectionError("SMTP: \(desc)")) }
+        context.close(promise: nil)
     }
 }

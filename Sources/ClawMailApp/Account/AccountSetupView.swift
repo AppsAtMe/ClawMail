@@ -166,8 +166,10 @@ struct AccountSetupView: View {
             saveAccount()
             step = .done
         case .connectionTest where !testsPassed:
+            // Clear results to trigger .task(id:) in ConnectionTestView.
+            // Don't set testInProgress here — runTests() handles that.
+            testInProgress = false
             testResults = []
-            testInProgress = true
         default:
             step = SetupStep(rawValue: step.rawValue + 1)!
         }

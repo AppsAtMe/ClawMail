@@ -62,8 +62,14 @@ public final class IPCServer: Sendable {
         return appSupport.appendingPathComponent("ClawMail/clawmail.sock").path
     }
 
-    /// Path to the IPC authentication token file.
-    public static var tokenPath: String {
+    /// Path to the IPC authentication token file (co-located with the socket).
+    public var tokenPath: String {
+        let dir = (socketPath as NSString).deletingLastPathComponent
+        return (dir as NSString).appendingPathComponent("ipc.token")
+    }
+
+    /// Token path for the default socket location (used by IPCClient).
+    public static var defaultTokenPath: String {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return appSupport.appendingPathComponent("ClawMail/ipc.token").path
     }
@@ -87,7 +93,6 @@ public final class IPCServer: Sendable {
         // Generate IPC auth token and write to file with restrictive permissions
         let token = Self.generateToken()
         self.ipcToken = token
-        let tokenPath = Self.tokenPath
         try token.write(toFile: tokenPath, atomically: true, encoding: .utf8)
         // Set file permissions to owner-only (0600)
         try FileManager.default.setAttributes(
@@ -116,7 +121,7 @@ public final class IPCServer: Sendable {
         ch?.close(mode: .all, promise: noPromise)
         try? await group.shutdownGracefully()
         try? FileManager.default.removeItem(atPath: socketPath)
-        try? FileManager.default.removeItem(atPath: Self.tokenPath)
+        try? FileManager.default.removeItem(atPath: tokenPath)
         ipcToken = nil
     }
 
@@ -257,7 +262,7 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
         guard let params = request.params,
               case .string(let token) = params["token"],
               let expected = server.ipcToken,
-              token == expected else {
+              Self.constantTimeEqual(token, expected) else {
             let resp = JSONRPCResponse.error(
                 id: request.id, code: JSONRPCError.authFailed,
                 message: "Invalid IPC authentication token"
@@ -286,6 +291,18 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
         }
         let noPromise: EventLoopPromise<Void>? = nil
         context.close(promise: noPromise)
+    }
+
+    /// Constant-time string comparison to prevent timing attacks on the IPC token.
+    private static func constantTimeEqual(_ a: String, _ b: String) -> Bool {
+        let aBytes = Array(a.utf8)
+        let bBytes = Array(b.utf8)
+        guard aBytes.count == bBytes.count else { return false }
+        var result: UInt8 = 0
+        for (x, y) in zip(aBytes, bBytes) {
+            result |= x ^ y
+        }
+        return result == 0
     }
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {

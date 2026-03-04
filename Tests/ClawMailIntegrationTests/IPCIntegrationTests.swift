@@ -8,24 +8,35 @@ struct IPCIntegrationTests {
 
     // MARK: - IPC Server Start/Stop
 
+    /// Create a short temp directory for IPC test sockets (Unix sockets have a 104-byte path limit on macOS).
+    private static func makeTestSocketDir() throws -> String {
+        let dir = "/tmp/cm-\(UInt32.random(in: 0...0xFFFF))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     @Test func ipcServerStartsAndStops() async throws {
         let db = try TestConfig.inMemoryDatabase()
         let config = TestConfig.testConfig()
         let orchestrator = try AccountOrchestrator(config: config, databaseManager: db)
 
-        let socketPath = NSTemporaryDirectory() + "clawmail-test-\(UUID().uuidString).sock"
+        let dir = try Self.makeTestSocketDir()
+        let socketPath = dir + "/t.sock"
         let server = IPCServer(orchestrator: orchestrator, socketPath: socketPath)
 
         try await server.start()
 
         // Verify socket file exists
         #expect(FileManager.default.fileExists(atPath: socketPath))
+        // Verify token file exists
+        #expect(FileManager.default.fileExists(atPath: server.tokenPath))
 
         await server.stop()
 
         // Verify socket file is cleaned up
         #expect(!FileManager.default.fileExists(atPath: socketPath))
         await orchestrator.stop()
+        try? FileManager.default.removeItem(atPath: dir)
     }
 
     // MARK: - IPC Client Connection
@@ -35,7 +46,8 @@ struct IPCIntegrationTests {
         let config = TestConfig.testConfig()
         let orchestrator = try AccountOrchestrator(config: config, databaseManager: db)
 
-        let socketPath = NSTemporaryDirectory() + "clawmail-test-\(UUID().uuidString).sock"
+        let dir = try Self.makeTestSocketDir()
+        let socketPath = dir + "/t.sock"
         let server = IPCServer(orchestrator: orchestrator, socketPath: socketPath)
         try await server.start()
 
@@ -50,6 +62,7 @@ struct IPCIntegrationTests {
         await client.disconnect()
         await server.stop()
         await orchestrator.stop()
+        try? FileManager.default.removeItem(atPath: dir)
     }
 
     // MARK: - IPC List Accounts
@@ -59,7 +72,8 @@ struct IPCIntegrationTests {
         let config = TestConfig.testConfig()
         let orchestrator = try AccountOrchestrator(config: config, databaseManager: db)
 
-        let socketPath = NSTemporaryDirectory() + "clawmail-test-\(UUID().uuidString).sock"
+        let dir = try Self.makeTestSocketDir()
+        let socketPath = dir + "/t.sock"
         let server = IPCServer(orchestrator: orchestrator, socketPath: socketPath)
         try await server.start()
 
@@ -72,6 +86,7 @@ struct IPCIntegrationTests {
         await client.disconnect()
         await server.stop()
         await orchestrator.stop()
+        try? FileManager.default.removeItem(atPath: dir)
     }
 
     // MARK: - Agent Lock Prevents Second Connection
@@ -81,7 +96,8 @@ struct IPCIntegrationTests {
         let config = TestConfig.testConfig()
         let orchestrator = try AccountOrchestrator(config: config, databaseManager: db)
 
-        let socketPath = NSTemporaryDirectory() + "clawmail-test-\(UUID().uuidString).sock"
+        let dir = try Self.makeTestSocketDir()
+        let socketPath = dir + "/t.sock"
         let server = IPCServer(orchestrator: orchestrator, socketPath: socketPath)
         try await server.start()
 
@@ -102,5 +118,6 @@ struct IPCIntegrationTests {
         await client1.disconnect()
         await server.stop()
         await orchestrator.stop()
+        try? FileManager.default.removeItem(atPath: dir)
     }
 }

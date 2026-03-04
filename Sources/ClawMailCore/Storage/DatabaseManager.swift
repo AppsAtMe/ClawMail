@@ -2,7 +2,8 @@ import Foundation
 import GRDB
 
 public final class DatabaseManager: Sendable {
-    private let dbPool: DatabasePool
+    /// Underlying database writer — DatabasePool for production, DatabaseQueue for in-memory tests.
+    private let dbWriter: any DatabaseWriter
 
     public static let defaultDatabaseURL: URL = {
         AppConfig.defaultDirectoryURL.appendingPathComponent("metadata.sqlite")
@@ -12,31 +13,32 @@ public final class DatabaseManager: Sendable {
         let dbPath = path ?? Self.defaultDatabaseURL.path
         let directory = URL(fileURLWithPath: dbPath).deletingLastPathComponent().path
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-        dbPool = try DatabasePool(path: dbPath)
-        try Self.runMigrations(dbPool)
+        let pool = try DatabasePool(path: dbPath)
+        self.dbWriter = pool
+        try Self.runMigrations(pool)
     }
 
-    /// For in-memory testing
+    /// For in-memory testing. Uses DatabaseQueue since in-memory SQLite doesn't support WAL mode
+    /// (which DatabasePool requires).
     public init(inMemory: Bool) throws {
-        dbPool = try DatabasePool(path: ":memory:")
-        try Self.runMigrations(dbPool)
+        let queue = try DatabaseQueue()
+        self.dbWriter = queue
+        try Self.runMigrations(queue)
     }
-
-    public var pool: DatabasePool { dbPool }
 
     // MARK: - Read/Write helpers
 
     public func read<T: Sendable>(_ block: @Sendable @escaping (Database) throws -> T) throws -> T {
-        try dbPool.read(block)
+        try dbWriter.read(block)
     }
 
     public func write<T: Sendable>(_ block: @Sendable @escaping (Database) throws -> T) throws -> T {
-        try dbPool.write(block)
+        try dbWriter.write(block)
     }
 
     // MARK: - Migrations
 
-    private static func runMigrations(_ dbPool: DatabasePool) throws {
+    private static func runMigrations(_ writer: any DatabaseWriter) throws {
         var migrator = DatabaseMigrator()
 
         // Migration 1: Message metadata
@@ -137,6 +139,6 @@ public final class DatabaseManager: Sendable {
             }
         }
 
-        try migrator.migrate(dbPool)
+        try migrator.migrate(writer)
     }
 }

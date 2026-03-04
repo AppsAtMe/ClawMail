@@ -17,11 +17,6 @@ struct AuthMiddleware: RouterMiddleware {
         self.keychainManager = keychainManager
     }
 
-    /// Legacy init that accepts a static key (still works for tests).
-    init(apiKey: String) {
-        self.keychainManager = KeychainManager()
-    }
-
     func handle(
         _ request: Request,
         context: Context,

@@ -17,8 +17,6 @@ let package = Package(
         // Networking
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.27.0"),
-        .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.20.0"),
-
         // Database
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
 
@@ -57,6 +55,10 @@ let package = Package(
             dependencies: [
                 "ClawMailCore",
                 .product(name: "Hummingbird", package: "hummingbird"),
+            ],
+            exclude: [
+                "Resources/Info.plist",
+                "Resources/ClawMail.entitlements",
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

@@ -18,7 +18,14 @@ public struct SearchQuery: Sendable {
 
     public init() {}
 
-    /// Build an FTS5 query string for SQLite search
+    /// Build an FTS5 query string for SQLite search.
+    ///
+    /// NOTE: This produces FTS5 queries with column prefixes and operators (AND, OR).
+    /// Each individual term is phrase-escaped via `ftsEscape()`, but the overall query
+    /// structure uses raw FTS5 syntax. This is intentional — `MetadataIndex.sanitizeFTS5Query()`
+    /// is NOT applied to these queries since they are constructed internally with controlled structure.
+    /// `sanitizeFTS5Query()` is only for raw user input that bypasses SearchEngine (e.g., direct
+    /// FTS5 query strings from the REST API search endpoint).
     public var ftsQuery: String? {
         var parts: [String] = []
 

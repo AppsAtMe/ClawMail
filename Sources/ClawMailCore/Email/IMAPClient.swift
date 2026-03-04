@@ -933,15 +933,15 @@ public actor IMAPClient {
     /// Fetch a specific MIME section (e.g. attachment data) by section number.
     /// Section must be a valid MIME section specifier (digits and dots only, e.g. "1", "1.2", "2.1.3").
     public func fetchAttachment(folder: String, uid: UInt32, section: String) async throws -> Data {
-        try ensureConnected()
-        if selectedFolder != folder {
-            _ = try await selectFolder(folder)
-        }
-
-        // Validate section is a safe MIME section specifier (digits and dots only)
+        // Validate section before any network I/O — prevents injection even if not connected
         let sectionPattern = /^[0-9]+(\.[0-9]+)*$/
         guard section.wholeMatch(of: sectionPattern) != nil else {
             throw ClawMailError.invalidParameter("Invalid MIME section specifier: \(section)")
+        }
+
+        try ensureConnected()
+        if selectedFolder != folder {
+            _ = try await selectFolder(folder)
         }
 
         let tag = nextTag()

@@ -7,6 +7,7 @@ import NIO
 public final class IPCClient: @unchecked Sendable {
 
     private let socketPath: String
+    private let tokenPath: String
     private let group: EventLoopGroup
     private var channel: Channel?
     private let responseHandler: IPCClientHandler
@@ -16,8 +17,11 @@ public final class IPCClient: @unchecked Sendable {
 
     private var nextId: Int = 1
 
-    public init(socketPath: String? = nil) {
-        self.socketPath = socketPath ?? IPCServer.defaultSocketPath
+    public init(socketPath: String? = nil, tokenPath: String? = nil) {
+        let sock = socketPath ?? IPCServer.defaultSocketPath
+        self.socketPath = sock
+        // Default: token file is co-located with the socket
+        self.tokenPath = tokenPath ?? ((sock as NSString).deletingLastPathComponent as NSString).appendingPathComponent("ipc.token")
         self.group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         self.responseHandler = IPCClientHandler()
     }
@@ -52,7 +56,6 @@ public final class IPCClient: @unchecked Sendable {
 
     /// Read the IPC token from the token file and send an auth.handshake message.
     private func authenticate() async throws {
-        let tokenPath = IPCServer.tokenPath
         guard let token = try? String(contentsOfFile: tokenPath, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines) else {
             throw ClawMailError.authFailed("Cannot read IPC token file at \(tokenPath)")

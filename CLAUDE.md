@@ -82,5 +82,14 @@ The blueprint (BLUEPRINT.md) includes an agent team orchestration section. Key p
 - App config: `~/Library/Application Support/ClawMail/config.json`
 - Database: `~/Library/Application Support/ClawMail/metadata.sqlite`
 - IPC socket: `~/Library/Application Support/ClawMail/clawmail.sock`
+- IPC token: `~/Library/Application Support/ClawMail/ipc.token` (0600)
 - Credentials: macOS Keychain (service: `com.clawmail`)
+- API key: Keychain account `clawmail-api-key` (retrieve: `security find-generic-password -s "com.clawmail" -a "clawmail-api-key" -w`)
 - LaunchAgent: `~/Library/LaunchAgents/com.clawmail.agent.plist`
+
+## Known Limitations
+
+- **IPC single-client**: Only one CLI/MCP client can connect at a time. Back-to-back CLI commands may fail. Use REST API (`localhost:24601/api/v1/...`) for reliable concurrent access. See `.claude/handoff.md` for fix options.
+- **IPC handler shared instance**: `IPCServerHandler` in `IPCServer.swift` is created once and shared across connections — `authenticated` flag leaks between sessions. Fix: create handler inside `childChannelInitializer`.
+- **Gmail requires App Passwords**: Regular passwords rejected with `5.7.8 BadCredentials`.
+- **NIO error display**: Always use `String(describing: error)` not `error.localizedDescription` for NIO errors — Foundation produces generic "error N" messages.

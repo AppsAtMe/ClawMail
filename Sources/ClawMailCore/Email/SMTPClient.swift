@@ -295,7 +295,8 @@ public actor SMTPClient {
         if channel?.isActive == true {
             try await sendCommand("QUIT")
             _ = try? await readResponse()
-            try await channel?.close()
+            // Server may have already closed the connection after QUIT response.
+            try? await channel?.close()
         }
         try await group?.shutdownGracefully()
         channel = nil

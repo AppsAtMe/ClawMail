@@ -1,0 +1,32 @@
+version: "3.8"
+
+services:
+  greenmail:
+    image: greenmail/standalone:2.1.0
+    ports:
+      - "3025:3025"   # SMTP
+      - "3110:3110"   # POP3
+      - "3143:3143"   # IMAP
+      - "3465:3465"   # SMTPS
+      - "3993:3993"   # IMAPS
+      - "8080:8080"   # GreenMail REST API
+    environment:
+      - GREENMAIL_OPTS=-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users=testuser:testpass@clawmail.test,sender:senderpass@clawmail.test
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/user"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  radicale:
+    image: tomsquest/docker-radicale:3.2.3.1
+    ports:
+      - "5232:5232"   # CalDAV/CardDAV
+    volumes:
+      - radicale_data:/data
+    environment:
+      - RADICALE_AUTH_TYPE=none
+
+volumes:
+  radicale_data:

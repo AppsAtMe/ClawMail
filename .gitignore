@@ -1,0 +1,21 @@
+# Swift / SPM
+.build/
+.swiftpm/
+Package.resolved
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Claude Code
+.claude/
+
+# IDE
+.vscode/
+.idea/
+
+# Docker volumes
+docker-data/

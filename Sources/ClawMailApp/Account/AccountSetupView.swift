@@ -45,6 +45,7 @@ struct AccountSetupView: View {
     @State private var testResults: [ConnectionTestResult] = []
     @State private var oauthInProgress = false
     @State private var oauthTokens: OAuthTokens?
+    @State private var saveError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -108,7 +109,7 @@ struct AccountSetupView: View {
             )
             .environment(appState)
         case .label:
-            LabelEntryView(accountLabel: $accountLabel, emailAddress: emailAddress)
+            LabelEntryView(accountLabel: $accountLabel, emailAddress: emailAddress, saveError: saveError)
         case .done:
             DoneView(accountLabel: accountLabel, emailAddress: emailAddress)
         }
@@ -223,19 +224,24 @@ struct AccountSetupView: View {
         )
 
         Task {
-            let km = KeychainManager()
-            if let tokens = oauthTokens {
-                try? await km.saveOAuthTokens(
-                    accountId: account.id,
-                    accessToken: tokens.accessToken,
-                    refreshToken: tokens.refreshToken,
-                    expiresAt: tokens.expiresAt
-                )
-            } else if !password.isEmpty {
-                try? await km.savePassword(accountId: account.id, password: password)
+            do {
+                let km = KeychainManager()
+                if let tokens = oauthTokens {
+                    try await km.saveOAuthTokens(
+                        accountId: account.id,
+                        accessToken: tokens.accessToken,
+                        refreshToken: tokens.refreshToken,
+                        expiresAt: tokens.expiresAt
+                    )
+                } else if !password.isEmpty {
+                    try await km.savePassword(accountId: account.id, password: password)
+                }
+                try await appState.orchestrator?.addAccount(account)
+                await appState.refreshAccounts()
+            } catch {
+                saveError = String(describing: error)
+                step = .label
             }
-            try? await appState.orchestrator?.addAccount(account)
-            await appState.refreshAccounts()
         }
     }
 }
@@ -401,6 +407,7 @@ private struct CredentialsFormView: View {
 private struct LabelEntryView: View {
     @Binding var accountLabel: String
     let emailAddress: String
+    var saveError: String?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -416,6 +423,12 @@ private struct LabelEntryView: View {
                         accountLabel = String(domain.split(separator: ".").first ?? "account").capitalized
                     }
                 }
+            if let error = saveError {
+                Text("Failed to save account: \(error)")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+                    .frame(maxWidth: 300)
+            }
         }
         .padding()
     }

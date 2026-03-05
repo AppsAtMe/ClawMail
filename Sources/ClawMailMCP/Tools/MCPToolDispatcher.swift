@@ -72,7 +72,7 @@ actor MCPToolDispatcher {
             if let clawError = error as? ClawMailError {
                 errorMessage = "Error: \(clawError.message)"
             } else {
-                errorMessage = "Error: \(error.localizedDescription)"
+                errorMessage = "Error: \(String(describing: error))"
             }
             return ToolCallResult(
                 content: .array([

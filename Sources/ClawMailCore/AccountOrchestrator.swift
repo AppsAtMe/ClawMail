@@ -29,8 +29,14 @@ public actor AccountOrchestrator {
     private var connections: [String: AccountConnection] = [:]
     private var agentInterface: AgentInterface?
 
-    /// Callback for new mail notifications (set by MCP server).
+    /// Callback for new mail notifications (account label, folder).
     public var onNewMail: (@Sendable (String, String) -> Void)?
+
+    /// Callback for connection status changes (account label, new status).
+    public var onConnectionStatusChanged: (@Sendable (String, ConnectionStatus) -> Void)?
+
+    /// Callback for errors (account label, error description).
+    public var onError: (@Sendable (String, String) -> Void)?
 
     // MARK: - Init
 
@@ -46,6 +52,17 @@ public actor AccountOrchestrator {
             metadataIndex: metadataIndex
         )
         self.credentialStore = CredentialStore(keychainManager: KeychainManager())
+    }
+
+    /// Set all notification callbacks at once.
+    public func setCallbacks(
+        onNewMail: @escaping @Sendable (String, String) -> Void,
+        onConnectionStatusChanged: @escaping @Sendable (String, ConnectionStatus) -> Void,
+        onError: @escaping @Sendable (String, String) -> Void
+    ) {
+        self.onNewMail = onNewMail
+        self.onConnectionStatusChanged = onConnectionStatusChanged
+        self.onError = onError
     }
 
     // MARK: - Lifecycle
@@ -67,9 +84,13 @@ public actor AccountOrchestrator {
 
     public func stop() async {
         await syncScheduler.stop()
-        for (_, conn) in connections {
+        for (label, conn) in connections {
             await conn.emailManager.disconnect()
             await conn.idleMonitor.stop()
+            if let idx = config.accounts.firstIndex(where: { $0.label == label }) {
+                config.accounts[idx].connectionStatus = .disconnected
+            }
+            onConnectionStatusChanged?(label, .disconnected)
         }
         connections.removeAll()
     }
@@ -520,6 +541,12 @@ public actor AccountOrchestrator {
 
         try await emailManager.connect()
 
+        // Update account's connection status in config and notify
+        if let idx = config.accounts.firstIndex(where: { $0.label == account.label }) {
+            config.accounts[idx].connectionStatus = .connected
+        }
+        onConnectionStatusChanged?(account.label, .connected)
+
         var calMgr: CalendarManager? = nil
         var contactsMgr: ContactsManager? = nil
         var taskMgr: TaskManager? = nil
@@ -551,14 +578,21 @@ public actor AccountOrchestrator {
         )
 
         let newMailCallback = onNewMail
+        let errorCallback = onError
         let sEngine = syncEngine
         try await idleMonitor.start(
             account: account,
             credential: imapCredential,
             folders: ["INBOX"],
-            onNewMail: { [newMailCallback, sEngine] accountLabel, folder in
+            onNewMail: { [newMailCallback, errorCallback, sEngine] accountLabel, folder in
                 Task {
-                    try? await sEngine.handleNewMail(folder: folder)
+                    do {
+                        try await sEngine.handleNewMail(folder: folder)
+                    } catch {
+                        let msg = String(describing: error)
+                        fputs("ClawMail: IDLE sync error for \(accountLabel)/\(folder): \(msg)\n", stderr)
+                        errorCallback?(accountLabel, msg)
+                    }
                 }
                 newMailCallback?(accountLabel, folder)
             }

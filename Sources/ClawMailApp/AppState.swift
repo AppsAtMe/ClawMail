@@ -27,6 +27,7 @@ final class AppState {
     var orchestrator: AccountOrchestrator?
     var ipcServer: IPCServer?
     var apiServer: APIServer?
+    var webhookManager: WebhookManager?
 
     // MARK: - Config
 

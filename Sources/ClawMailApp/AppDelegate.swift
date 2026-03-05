@@ -56,6 +56,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try await ipcServer.start()
             appState.ipcServer = ipcServer
 
+            // Wire webhook manager (if configured)
+            let webhookManager = WebhookManager(urlString: config.webhookURL)
+            appState.webhookManager = webhookManager
+
+            // Wire orchestrator notifications → IPC server (MCP push) + webhooks
+            let wm = webhookManager
+            await orchestrator.setCallbacks(
+                onNewMail: { accountLabel, folder in
+                    ipcServer.sendNotification(JSONRPCNotification(
+                        method: "clawmail/newMail",
+                        params: ["account": .string(accountLabel), "folder": .string(folder)]
+                    ))
+                    if let wm = wm {
+                        Task { await wm.notifyNewEmail(account: accountLabel, folder: folder) }
+                    }
+                },
+                onConnectionStatusChanged: { accountLabel, status in
+                    ipcServer.sendNotification(JSONRPCNotification(
+                        method: "clawmail/connectionStatus",
+                        params: [
+                            "account": .string(accountLabel),
+                            "status": .string(String(describing: status)),
+                        ]
+                    ))
+                },
+                onError: { accountLabel, errorMessage in
+                    ipcServer.sendNotification(JSONRPCNotification(
+                        method: "clawmail/error",
+                        params: [
+                            "account": .string(accountLabel),
+                            "error": .string(errorMessage),
+                        ]
+                    ))
+                }
+            )
+
             // Retrieve API key for REST server
             let keychainManager = KeychainManager()
             var apiKey = await keychainManager.getAPIKey()
@@ -86,7 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
         } catch {
-            appState.launchError = error.localizedDescription
+            appState.launchError = String(describing: error)
             appState.isRunning = false
         }
     }

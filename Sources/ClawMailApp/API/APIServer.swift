@@ -40,8 +40,8 @@ public actor APIServer {
             try await app.runService()
         }
 
-        // Give the server a moment to bind
-        try await Task.sleep(for: .milliseconds(100))
+        // Brief wait for bind — failures are immediate, success means the server is listening
+        try await Task.sleep(for: .milliseconds(200))
     }
 
     /// Stop the HTTP server.
@@ -57,7 +57,9 @@ public actor APIServer {
 
         // Auth middleware reads from Keychain on each request for hot-reload support
         guard apiKey != nil else {
-            preconditionFailure("APIServer requires a non-nil apiKey")
+            // This is a programming error — APIServer should always have an API key.
+            // Using fatalError instead of preconditionFailure so it also fires in release builds.
+            fatalError("APIServer requires a non-nil apiKey")
         }
         router.middlewares.add(RateLimitMiddleware())
         router.middlewares.add(AuthMiddleware(keychainManager: KeychainManager()))
@@ -131,7 +133,7 @@ func genericErrorResponse(_ error: any Error) -> Response {
     if let clawError = error as? ClawMailError {
         return clawMailErrorResponse(clawError)
     }
-    return internalErrorResponse(error.localizedDescription)
+    return internalErrorResponse(String(describing: error))
 }
 
 /// Build a 500 Internal Server Error response.

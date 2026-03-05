@@ -24,7 +24,7 @@ public actor IPCDispatcher {
         } catch let error as ClawMailError {
             return JSONRPCResponse(id: request.id, error: .from(error))
         } catch {
-            return .error(id: request.id, code: JSONRPCError.internalError, message: error.localizedDescription)
+            return .error(id: request.id, code: JSONRPCError.internalError, message: String(describing: error))
         }
     }
 

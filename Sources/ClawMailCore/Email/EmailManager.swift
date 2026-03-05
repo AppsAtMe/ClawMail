@@ -20,36 +20,8 @@ public actor EmailManager {
 
     // MARK: - Init
 
-    public init(account: Account, metadataIndex: MetadataIndex) {
-        self.account = account
-        self.metadataIndex = metadataIndex
-
-        let imapCredential: IMAPCredential
-        switch account.authMethod {
-        case .password:
-            imapCredential = .password(username: account.emailAddress, password: "")
-        case .oauth2:
-            imapCredential = .oauth2(username: account.emailAddress, accessToken: "")
-        }
-
-        self.imapClient = IMAPClient(
-            host: account.imapHost,
-            port: account.imapPort,
-            security: account.imapSecurity,
-            credential: imapCredential
-        )
-
-        let smtpCreds: Credentials = .password("")
-        self.smtpClient = SMTPClient(
-            host: account.smtpHost,
-            port: account.smtpPort,
-            security: account.smtpSecurity,
-            credentials: smtpCreds,
-            senderEmail: account.emailAddress
-        )
-    }
-
-    /// Direct dependency injection for testing or advanced configuration.
+    /// Direct dependency injection — the only public initializer.
+    /// Callers must provide fully-configured IMAP/SMTP clients with real credentials.
     public init(
         account: Account,
         imapClient: IMAPClient,
@@ -72,7 +44,7 @@ public actor EmailManager {
             try await smtpClient.connect()
             _status = .connected
         } catch {
-            _status = .error(error.localizedDescription)
+            _status = .error(String(describing: error))
             throw error
         }
     }
@@ -119,8 +91,7 @@ public actor EmailManager {
         guard let summary = try metadataIndex.getMessage(id: id, account: account.label) else {
             throw ClawMailError.messageNotFound(id)
         }
-
-        guard let uid = UInt32(id.components(separatedBy: "/").last ?? "") else {
+        guard let uid = summary.uid ?? UInt32(id.components(separatedBy: "/").last ?? "") else {
             throw ClawMailError.messageNotFound(id)
         }
         let folder = summary.folder

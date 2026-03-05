@@ -20,20 +20,18 @@ public final class MetadataIndex: Sendable {
             let recipientsStr = String(data: recipientsJSON, encoding: .utf8) ?? "[]"
             let flagsStr = String(data: flagsJSON, encoding: .utf8) ?? "[]"
 
-            // When we have body text, clean up old FTS entry before replacing
-            // the metadata row (INSERT OR REPLACE changes the rowid, orphaning old FTS)
-            if bodyText != nil {
-                let oldRowid = try Int64.fetchOne(
-                    db,
-                    sql: "SELECT rowid FROM message_metadata WHERE id = ? AND account_label = ?",
-                    arguments: [summary.id, summary.account]
+            // Always clean up old FTS entry before INSERT OR REPLACE, since
+            // REPLACE changes the rowid, orphaning any existing FTS entry.
+            let oldRowid = try Int64.fetchOne(
+                db,
+                sql: "SELECT rowid FROM message_metadata WHERE id = ? AND account_label = ?",
+                arguments: [summary.id, summary.account]
+            )
+            if let oldRowid = oldRowid {
+                try db.execute(
+                    sql: "DELETE FROM message_fts WHERE rowid = ?",
+                    arguments: [oldRowid]
                 )
-                if let oldRowid = oldRowid {
-                    try db.execute(
-                        sql: "DELETE FROM message_fts WHERE rowid = ?",
-                        arguments: [oldRowid]
-                    )
-                }
             }
 
             try db.execute(
@@ -84,12 +82,12 @@ public final class MetadataIndex: Sendable {
 
     public func getMessage(id: String, account: String) throws -> EmailSummary? {
         try db.read { db in
-            let row = try Row.fetchOne(
+            guard let row = try Row.fetchOne(
                 db,
                 sql: "SELECT * FROM message_metadata WHERE id = ? AND account_label = ?",
                 arguments: [id, account]
-            )
-            return row.map { try? Self.summaryFromRow($0) } ?? nil
+            ) else { return nil }
+            return try Self.summaryFromRow(row)
         }
     }
 
@@ -112,7 +110,7 @@ public final class MetadataIndex: Sendable {
                 """,
                 arguments: [account, folder, limit, offset]
             )
-            return rows.compactMap { try? Self.summaryFromRow($0) }
+            return try rows.map { try Self.summaryFromRow($0) }
         }
     }
 
@@ -146,7 +144,7 @@ public final class MetadataIndex: Sendable {
             args += [limit, offset]
 
             let rows = try Row.fetchAll(db, sql: sql, arguments: args)
-            return rows.compactMap { try? Self.summaryFromRow($0) }
+            return try rows.map { try Self.summaryFromRow($0) }
         }
     }
 
@@ -290,7 +288,9 @@ public final class MetadataIndex: Sendable {
     }
 
     private static func summaryFromRow(_ row: Row) throws -> EmailSummary {
-        let flagStrings = try JSONDecoder().decode([String].self, from: (row["flags_json"] as String).data(using: .utf8)!)
+        let flagsStr: String = row["flags_json"] ?? "[]"
+        let flagsData = Data(flagsStr.utf8)
+        let flagStrings = try JSONDecoder().decode([String].self, from: flagsData)
         let flags = Set(flagStrings.compactMap { EmailFlag(rawValue: $0) })
 
         return EmailSummary(

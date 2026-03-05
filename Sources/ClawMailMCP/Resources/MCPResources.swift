@@ -105,7 +105,7 @@ actor MCPResourceHandler {
             if let clawError = error as? ClawMailError {
                 errorMessage = clawError.message
             } else {
-                errorMessage = error.localizedDescription
+                errorMessage = String(describing: error)
             }
             return .dictionary([
                 "contents": .array([

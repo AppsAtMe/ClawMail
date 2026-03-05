@@ -92,6 +92,14 @@ struct OAuthFlowView: View {
     // MARK: - OAuth Flow
 
     private func startOAuthFlow() {
+        // Validate that OAuth client IDs are configured before starting
+        let clientId = oauthClientId(for: provider)
+        guard !clientId.isEmpty else {
+            status = .failed
+            errorMessage = "OAuth client ID not configured for \(provider.rawValue.capitalized). Go to Settings → API → OAuth to enter your client ID."
+            return
+        }
+
         inProgress = true
         status = .browserOpened
 
@@ -107,7 +115,7 @@ struct OAuthFlowView: View {
 
                 // 3. Build authorization URL with the actual redirect URI
                 let oauthManager = OAuth2Manager(keychainManager: KeychainManager())
-                let config = Self.oauthConfig(for: provider, redirectURI: redirectURI)
+                let config = Self.oauthConfig(for: provider, appConfig: appState.config, redirectURI: redirectURI)
                 await oauthManager.setConfig(config, for: provider)
 
                 let authURL = try await oauthManager.buildAuthorizationURL(provider: provider, state: state)
@@ -173,13 +181,21 @@ struct OAuthFlowView: View {
 
     // MARK: - Helpers
 
+    /// Returns the configured OAuth client ID for the given provider.
+    private func oauthClientId(for provider: OAuthProvider) -> String {
+        switch provider {
+        case .google: return appState.config.oauthGoogleClientId ?? ""
+        case .microsoft: return appState.config.oauthMicrosoftClientId ?? ""
+        }
+    }
+
     /// Build OAuthConfig with the actual redirect URI (includes the callback server's port).
-    private static func oauthConfig(for provider: OAuthProvider, redirectURI: String) -> OAuthConfig {
+    private static func oauthConfig(for provider: OAuthProvider, appConfig: AppConfig, redirectURI: String) -> OAuthConfig {
         switch provider {
         case .google:
             return OAuthConfig(
-                clientId: OAuthClientConfig.googleClientId,
-                clientSecret: OAuthClientConfig.googleClientSecret,
+                clientId: appConfig.oauthGoogleClientId ?? "",
+                clientSecret: appConfig.oauthGoogleClientSecret,
                 authorizationEndpoint: URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!,
                 tokenEndpoint: URL(string: "https://oauth2.googleapis.com/token")!,
                 scopes: [
@@ -191,8 +207,8 @@ struct OAuthFlowView: View {
             )
         case .microsoft:
             return OAuthConfig(
-                clientId: OAuthClientConfig.microsoftClientId,
-                clientSecret: OAuthClientConfig.microsoftClientSecret,
+                clientId: appConfig.oauthMicrosoftClientId ?? "",
+                clientSecret: appConfig.oauthMicrosoftClientSecret,
                 authorizationEndpoint: URL(string: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize")!,
                 tokenEndpoint: URL(string: "https://login.microsoftonline.com/common/oauth2/v2.0/token")!,
                 scopes: [
@@ -228,17 +244,3 @@ struct OAuthFlowView: View {
     }
 }
 
-// MARK: - OAuth Client Configuration
-
-/// Centralized OAuth client IDs. In a shipping app these would come from
-/// a configuration file or environment, never hardcoded. These are placeholders
-/// that must be replaced with real client IDs from the Google/Microsoft developer consoles.
-enum OAuthClientConfig {
-    // Replace with your registered OAuth2 client ID from Google Cloud Console
-    static let googleClientId = ""
-    static let googleClientSecret: String? = nil
-
-    // Replace with your registered OAuth2 client ID from Azure AD
-    static let microsoftClientId = ""
-    static let microsoftClientSecret: String? = nil
-}

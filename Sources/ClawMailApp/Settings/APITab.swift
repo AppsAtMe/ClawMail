@@ -11,6 +11,10 @@ struct APITab: View {
     @State private var webhookURL: String = ""
     @State private var keyCopied = false
     @State private var mcpConfigCopied = false
+    @State private var googleClientId: String = ""
+    @State private var googleClientSecret: String = ""
+    @State private var microsoftClientId: String = ""
+    @State private var microsoftClientSecret: String = ""
 
     var body: some View {
         Form {
@@ -122,6 +126,52 @@ struct APITab: View {
                 }
             }
 
+            Section("OAuth Client IDs") {
+                Text("Register your app at the Google Cloud Console or Azure AD portal, then enter the credentials here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Google Client ID") {
+                    TextField("Google Client ID", text: $googleClientId)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: 280)
+                        .onChange(of: googleClientId) { _, newValue in
+                            appState.config.oauthGoogleClientId = newValue.isEmpty ? nil : newValue
+                            try? appState.config.save()
+                        }
+                }
+
+                LabeledContent("Google Client Secret") {
+                    SecureField("Optional", text: $googleClientSecret)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: 280)
+                        .onChange(of: googleClientSecret) { _, newValue in
+                            appState.config.oauthGoogleClientSecret = newValue.isEmpty ? nil : newValue
+                            try? appState.config.save()
+                        }
+                }
+
+                LabeledContent("Microsoft Client ID") {
+                    TextField("Microsoft Client ID", text: $microsoftClientId)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: 280)
+                        .onChange(of: microsoftClientId) { _, newValue in
+                            appState.config.oauthMicrosoftClientId = newValue.isEmpty ? nil : newValue
+                            try? appState.config.save()
+                        }
+                }
+
+                LabeledContent("Microsoft Client Secret") {
+                    SecureField("Optional", text: $microsoftClientSecret)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: 280)
+                        .onChange(of: microsoftClientSecret) { _, newValue in
+                            appState.config.oauthMicrosoftClientSecret = newValue.isEmpty ? nil : newValue
+                            try? appState.config.save()
+                        }
+                }
+            }
+
             Section("Webhook") {
                 TextField("Webhook URL (optional)", text: $webhookURL)
                     .textFieldStyle(.roundedBorder)
@@ -142,6 +192,10 @@ struct APITab: View {
     private func loadState() {
         port = String(appState.config.restApiPort)
         webhookURL = appState.config.webhookURL ?? ""
+        googleClientId = appState.config.oauthGoogleClientId ?? ""
+        googleClientSecret = appState.config.oauthGoogleClientSecret ?? ""
+        microsoftClientId = appState.config.oauthMicrosoftClientId ?? ""
+        microsoftClientSecret = appState.config.oauthMicrosoftClientSecret ?? ""
         Task {
             let km = KeychainManager()
             if let key = await km.getAPIKey() {

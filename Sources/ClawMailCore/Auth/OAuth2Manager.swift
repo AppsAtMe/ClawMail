@@ -26,38 +26,6 @@ public struct OAuthConfig: Sendable {
         self.redirectURI = redirectURI
     }
 
-    public static func google(clientId: String, clientSecret: String? = nil) -> OAuthConfig {
-        OAuthConfig(
-            clientId: clientId,
-            clientSecret: clientSecret,
-            authorizationEndpoint: URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!,
-            tokenEndpoint: URL(string: "https://oauth2.googleapis.com/token")!,
-            scopes: [
-                "https://mail.google.com/",
-                "https://www.googleapis.com/auth/calendar",
-                "https://www.googleapis.com/auth/contacts",
-            ],
-            redirectURI: "http://127.0.0.1:0/oauth/callback"
-        )
-    }
-
-    public static func microsoft(clientId: String, clientSecret: String? = nil) -> OAuthConfig {
-        OAuthConfig(
-            clientId: clientId,
-            clientSecret: clientSecret,
-            authorizationEndpoint: URL(string: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize")!,
-            tokenEndpoint: URL(string: "https://login.microsoftonline.com/common/oauth2/v2.0/token")!,
-            scopes: [
-                "offline_access",
-                "IMAP.AccessAsUser.All",
-                "SMTP.Send",
-                "Calendars.ReadWrite",
-                "Contacts.ReadWrite",
-                "Tasks.ReadWrite",
-            ],
-            redirectURI: "http://127.0.0.1:0/oauth/callback"
-        )
-    }
 }
 
 // MARK: - OAuth2Manager

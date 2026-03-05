@@ -12,6 +12,10 @@ public struct AppConfig: Codable, Sendable {
     public var idleFolders: [String]
     public var launchAtLogin: Bool
     public var webhookURL: String?
+    public var oauthGoogleClientId: String?
+    public var oauthGoogleClientSecret: String?
+    public var oauthMicrosoftClientId: String?
+    public var oauthMicrosoftClientSecret: String?
 
     public init(
         accounts: [Account] = [],
@@ -22,7 +26,11 @@ public struct AppConfig: Codable, Sendable {
         auditRetentionDays: Int = 90,
         idleFolders: [String] = ["INBOX"],
         launchAtLogin: Bool = true,
-        webhookURL: String? = nil
+        webhookURL: String? = nil,
+        oauthGoogleClientId: String? = nil,
+        oauthGoogleClientSecret: String? = nil,
+        oauthMicrosoftClientId: String? = nil,
+        oauthMicrosoftClientSecret: String? = nil
     ) {
         self.accounts = accounts
         self.restApiPort = restApiPort
@@ -33,6 +41,10 @@ public struct AppConfig: Codable, Sendable {
         self.idleFolders = idleFolders
         self.launchAtLogin = launchAtLogin
         self.webhookURL = webhookURL
+        self.oauthGoogleClientId = oauthGoogleClientId
+        self.oauthGoogleClientSecret = oauthGoogleClientSecret
+        self.oauthMicrosoftClientId = oauthMicrosoftClientId
+        self.oauthMicrosoftClientSecret = oauthMicrosoftClientSecret
     }
 
     // MARK: - Persistence

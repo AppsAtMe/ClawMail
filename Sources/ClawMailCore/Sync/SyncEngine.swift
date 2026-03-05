@@ -129,7 +129,7 @@ public actor SyncEngine {
         let localMessages = try metadataIndex.listMessages(
             account: accountLabel,
             folder: folder,
-            limit: Int.max,
+            limit: 100_000,
             offset: 0,
             sort: .dateDescending
         )

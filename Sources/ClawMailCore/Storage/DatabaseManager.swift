@@ -82,9 +82,7 @@ public final class DatabaseManager: Sendable {
                     subject,
                     body_text,
                     sender_email,
-                    sender_name,
-                    content=message_metadata,
-                    content_rowid=rowid
+                    sender_name
                 )
             """)
         }

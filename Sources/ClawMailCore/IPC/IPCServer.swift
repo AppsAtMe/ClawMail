@@ -137,9 +137,14 @@ public final class IPCServer: Sendable {
         // Remove stale socket file
         try? FileManager.default.removeItem(atPath: socketPath)
 
-        // Ensure the directory exists
+        // Ensure the directory exists with owner-only access (0700).
+        // This prevents other users from accessing the socket or token files.
         let dir = (socketPath as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: dir
+        )
 
         // Generate IPC auth token and write to file with restrictive permissions
         let token = Self.generateToken()
@@ -251,6 +256,9 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
     private let dispatcher: IPCDispatcher
     private var authenticated = false
     private var sessionType: IPCSessionType = .cli
+    /// Result of peer credential verification (set in channelActive, checked in handleHandshake).
+    /// nil = check not yet completed, true = allowed, false = rejected.
+    private var peerAllowed: Bool?
 
     init(orchestrator: AccountOrchestrator, server: IPCServer) {
         self.orchestrator = orchestrator
@@ -259,9 +267,57 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
     }
 
     func channelActive(context: ChannelHandlerContext) {
-        // Connection accepted — session type determined during handshake.
-        // No rejection at this stage; the handshake decides whether to allow
-        // the connection based on session type.
+        // Verify connecting process via LOCAL_PEERPID (defense-in-depth).
+        // Store the result for the handshake to check. The Future callback runs
+        // on the same event loop, so it will complete before or during channelRead.
+        if let provider = context.channel as? (any SocketOptionProvider) {
+            let peerPIDFuture: EventLoopFuture<CInt> = provider.unsafeGetSocketOption(
+                level: .init(rawValue: SOL_LOCAL),
+                name: .init(rawValue: LOCAL_PEERPID)
+            )
+            peerPIDFuture.whenSuccess { [self] rawPID in
+                let pid = pid_t(rawPID)
+                self.peerAllowed = pid <= 0 || Self.isAllowedProcess(pid: pid)
+            }
+            peerPIDFuture.whenFailure { [self] _ in
+                self.peerAllowed = true // Can't verify — allow, token auth is primary
+            }
+        } else {
+            peerAllowed = true // Not a BSD socket channel — allow
+        }
+    }
+
+    /// Check if the process at the given PID is a known ClawMail executable.
+    ///
+    /// Verifies that the connecting process is a recognized ClawMail binary by
+    /// checking the executable name and path. Returns true if the process can't
+    /// be identified (fail-open, since token auth is the primary mechanism).
+    private static func isAllowedProcess(pid: pid_t) -> Bool {
+        let pathBuffer = UnsafeMutablePointer<CChar>.allocate(capacity: Int(MAXPATHLEN))
+        defer { pathBuffer.deallocate() }
+        let pathLen = proc_pidpath(pid, pathBuffer, UInt32(MAXPATHLEN))
+        guard pathLen > 0 else {
+            // Can't determine path — allow (token auth will catch unauthorized clients)
+            return true
+        }
+        let execPath = String(cString: pathBuffer)
+        let execName = (execPath as NSString).lastPathComponent
+
+        // Allow known ClawMail executables
+        let allowedNames: Set<String> = ["ClawMailCLI", "ClawMailMCP", "ClawMailApp", "clawmail"]
+        if allowedNames.contains(execName) { return true }
+
+        // Allow processes with "ClawMail" in their path (build artifacts, test runners)
+        if execPath.contains("ClawMail") { return true }
+
+        // Allow test infrastructure and swift toolchain processes.
+        // swift test runs tests via swiftpm-testing-helper or xctest.
+        if execPath.contains("/swift/") || execPath.contains("/swift-") ||
+           execName == "xctest" || execName.contains("swiftpm") {
+            return true
+        }
+
+        return false
     }
 
     func channelInactive(context: ChannelHandlerContext) {
@@ -312,6 +368,18 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
             let resp = JSONRPCResponse.error(
                 id: nil, code: JSONRPCError.authFailed,
                 message: "First message must be auth.handshake with a valid token"
+            )
+            sendAndClose(resp, context: context)
+            return
+        }
+
+        // Defense-in-depth: check peer credential result from channelActive.
+        // If the check hasn't completed yet (peerAllowed == nil), allow the
+        // connection — token auth is the primary mechanism.
+        if peerAllowed == false {
+            let resp = JSONRPCResponse.error(
+                id: request.id, code: JSONRPCError.authFailed,
+                message: "Peer process is not a recognized ClawMail executable"
             )
             sendAndClose(resp, context: context)
             return

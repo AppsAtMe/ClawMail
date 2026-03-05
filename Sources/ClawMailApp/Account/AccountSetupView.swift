@@ -44,6 +44,7 @@ struct AccountSetupView: View {
     @State private var testInProgress = false
     @State private var testResults: [ConnectionTestResult] = []
     @State private var oauthInProgress = false
+    @State private var oauthTokens: OAuthTokens?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -92,7 +93,10 @@ struct AccountSetupView: View {
                 password: $password,
                 caldavURL: $caldavURL,
                 carddavURL: $carddavURL,
-                oauthInProgress: $oauthInProgress
+                oauthInProgress: $oauthInProgress,
+                onTokensObtained: { tokens in
+                    oauthTokens = tokens
+                }
             )
             .environment(appState)
         case .connectionTest:
@@ -148,7 +152,7 @@ struct AccountSetupView: View {
         switch step {
         case .provider: return true
         case .credentials:
-            if provider != .other { return !oauthInProgress }
+            if provider != .other { return !oauthInProgress && oauthTokens != nil }
             return !emailAddress.isEmpty && !password.isEmpty && !imapHost.isEmpty && !smtpHost.isEmpty
         case .connectionTest: return !testInProgress
         case .label: return !accountLabel.isEmpty
@@ -170,6 +174,16 @@ struct AccountSetupView: View {
             // Don't set testInProgress here — runTests() handles that.
             testInProgress = false
             testResults = []
+        case .provider:
+            // Auto-fill known server settings for OAuth providers
+            if provider == .google {
+                imapHost = "imap.gmail.com"; imapPort = "993"; imapSecurity = .ssl
+                smtpHost = "smtp.gmail.com"; smtpPort = "465"; smtpSecurity = .ssl
+            } else if provider == .microsoft {
+                imapHost = "outlook.office365.com"; imapPort = "993"; imapSecurity = .ssl
+                smtpHost = "smtp.office365.com"; smtpPort = "587"; smtpSecurity = .starttls
+            }
+            step = .credentials
         default:
             step = SetupStep(rawValue: step.rawValue + 1)!
         }
@@ -209,8 +223,15 @@ struct AccountSetupView: View {
         )
 
         Task {
-            if !password.isEmpty {
-                let km = KeychainManager()
+            let km = KeychainManager()
+            if let tokens = oauthTokens {
+                try? await km.saveOAuthTokens(
+                    accountId: account.id,
+                    accessToken: tokens.accessToken,
+                    refreshToken: tokens.refreshToken,
+                    expiresAt: tokens.expiresAt
+                )
+            } else if !password.isEmpty {
                 try? await km.savePassword(accountId: account.id, password: password)
             }
             try? await appState.orchestrator?.addAccount(account)
@@ -279,6 +300,7 @@ private struct CredentialsFormView: View {
     @Binding var caldavURL: String
     @Binding var carddavURL: String
     @Binding var oauthInProgress: Bool
+    var onTokensObtained: ((OAuthTokens) -> Void)?
 
     var body: some View {
         ScrollView {
@@ -286,7 +308,8 @@ private struct CredentialsFormView: View {
                 if provider != .other {
                     OAuthFlowView(
                         provider: provider == .google ? .google : .microsoft,
-                        inProgress: $oauthInProgress
+                        inProgress: $oauthInProgress,
+                        onTokensObtained: onTokensObtained
                     )
                     .environment(appState)
                 } else {

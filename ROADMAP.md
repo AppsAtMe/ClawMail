@@ -4,10 +4,11 @@ Tracks unimplemented features, known limitations, and planned improvements. Item
 
 ## Security Hardening
 
-- [ ] **OAuth2 full implementation** — Complete the OAuth2 flow in `OAuthFlowView.swift` with state parameter validation (CSRF prevention), local HTTP callback listener, and token exchange. See security comments in the file.
-- [ ] **IPC peer credential verification** — In addition to the token handshake, verify the connecting process via `SO_PEERCRED` / `LOCAL_PEERPID` to ensure only expected executables (CLI, MCP) connect.
-- [ ] **Socket file permissions** — Explicitly `chmod 0700` the `~/Library/Application Support/ClawMail/` directory on startup to ensure only the owning user can access the socket and token files.
-- [ ] **REST API rate limiting on reads** — Add HTTP-level rate limiting middleware to prevent abuse of list/search endpoints (separate from the email send rate limiter in GuardrailEngine).
+- [x] **OAuth2 full implementation** — Local HTTP callback server (`OAuthCallbackServer`), cryptographic `state` parameter with constant-time validation (CSRF prevention per RFC 6749 §10.12), browser-based authorization, token exchange, Keychain storage. See `OAuthFlowView.swift` and `OAuthCallbackServer.swift`.
+- [x] **IPC peer credential verification** — `LOCAL_PEERPID` verification in `IPCServerHandler.channelActive` checks the connecting process via `proc_pidpath`. Fail-open design (token auth is primary). See `IPCServer.swift`.
+- [x] **Socket file permissions** — `chmod 0700` on `~/Library/Application Support/ClawMail/` at `IPCServer.start()`. Token file is `0600`.
+- [x] **REST API rate limiting on reads** — Token bucket rate limiter (`RateLimitMiddleware`) with 120 req/min capacity and continuous refill. Runs before auth middleware to prevent brute-force key guessing. See `RateLimitMiddleware.swift`.
+- [ ] **OAuth2 client ID configuration** — `OAuthClientConfig` placeholders need real client IDs from Google Cloud Console and Azure AD. Currently empty strings.
 
 ## Features (Deferred from Spec)
 

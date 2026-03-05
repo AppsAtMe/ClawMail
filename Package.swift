@@ -38,6 +38,7 @@ let package = Package(
             name: "ClawMailCore",
             dependencies: [
                 .product(name: "NIO", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "NIOFoundationCompat", package: "swift-nio"),
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
                 .product(name: "GRDB", package: "GRDB.swift"),

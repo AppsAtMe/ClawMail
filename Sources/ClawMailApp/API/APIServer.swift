@@ -59,6 +59,7 @@ public actor APIServer {
         guard apiKey != nil else {
             preconditionFailure("APIServer requires a non-nil apiKey")
         }
+        router.middlewares.add(RateLimitMiddleware())
         router.middlewares.add(AuthMiddleware(keychainManager: KeychainManager()))
 
         // Register all route groups

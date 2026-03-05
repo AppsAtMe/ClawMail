@@ -10,6 +10,22 @@ public struct OAuthConfig: Sendable {
     public let scopes: [String]
     public let redirectURI: String
 
+    public init(
+        clientId: String,
+        clientSecret: String?,
+        authorizationEndpoint: URL,
+        tokenEndpoint: URL,
+        scopes: [String],
+        redirectURI: String
+    ) {
+        self.clientId = clientId
+        self.clientSecret = clientSecret
+        self.authorizationEndpoint = authorizationEndpoint
+        self.tokenEndpoint = tokenEndpoint
+        self.scopes = scopes
+        self.redirectURI = redirectURI
+    }
+
     public static func google(clientId: String, clientSecret: String? = nil) -> OAuthConfig {
         OAuthConfig(
             clientId: clientId,

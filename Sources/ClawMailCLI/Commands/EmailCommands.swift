@@ -122,6 +122,9 @@ struct EmailSend: AsyncParsableCommand {
     @Option(name: .long, help: "HTML body")
     var bodyHtml: String?
 
+    @Option(name: .long, parsing: .upToNextOption, help: "File paths to attach")
+    var attach: [String] = []
+
     @Option(name: .long, help: "Output format (json or text)")
     var format: OutputFormat = .json
 
@@ -147,6 +150,9 @@ struct EmailSend: AsyncParsableCommand {
             params["bcc"] = .array(bcc.map { .dictionary(["email": .string($0)]) })
         }
         if let bodyHtml { params["bodyHtml"] = .string(bodyHtml) }
+        if !attach.isEmpty {
+            params["attachments"] = .array(attach.map { .string($0) })
+        }
 
         await executeRPC(socketPath: socketPath, method: "email.send", params: params, format: format)
     }

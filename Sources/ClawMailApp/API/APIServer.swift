@@ -71,6 +71,7 @@ public actor APIServer {
         ContactsRoutes.register(on: router, orchestrator: orchestrator)
         TasksRoutes.register(on: router, orchestrator: orchestrator)
         AuditRoutes.register(on: router, orchestrator: orchestrator)
+        RecipientsRoutes.register(on: router, orchestrator: orchestrator)
 
         return router
     }

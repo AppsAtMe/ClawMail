@@ -38,6 +38,9 @@ public actor AccountOrchestrator {
     /// Callback for errors (account label, error description).
     public var onError: (@Sendable (String, String) -> Void)?
 
+    /// Callback for pending recipient approval (account label, pending emails).
+    public var onPendingApproval: (@Sendable (String, [String]) -> Void)?
+
     // MARK: - Init
 
     public init(config: AppConfig, databaseManager: DatabaseManager) throws {
@@ -63,6 +66,11 @@ public actor AccountOrchestrator {
         self.onNewMail = onNewMail
         self.onConnectionStatusChanged = onConnectionStatusChanged
         self.onError = onError
+    }
+
+    /// Set callback for pending recipient approval notifications.
+    public func setPendingApprovalCallback(_ callback: @escaping @Sendable (String, [String]) -> Void) {
+        self.onPendingApproval = callback
     }
 
     // MARK: - Lifecycle
@@ -254,9 +262,10 @@ public actor AccountOrchestrator {
         )
     }
 
-    public func updateFlags(account: String, id: String, add: [EmailFlag] = [], remove: [EmailFlag] = []) async throws {
+    @discardableResult
+    public func updateFlags(account: String, id: String, add: [EmailFlag] = [], remove: [EmailFlag] = []) async throws -> EmailSummary {
         let mgr = try emailManager(for: account)
-        try await mgr.updateFlags(id: id, add: add, remove: remove)
+        let updated = try await mgr.updateFlags(id: id, add: add, remove: remove)
 
         try auditSuccess(
             operation: "email.updateFlags",
@@ -267,6 +276,8 @@ public actor AccountOrchestrator {
                 "remove": .string(remove.map(\.rawValue).joined(separator: ", ")),
             ]
         )
+
+        return updated
     }
 
     public func searchMessages(
@@ -461,8 +472,8 @@ public actor AccountOrchestrator {
 
     // MARK: - Audit
 
-    public func getAuditLog(account: String? = nil, limit: Int = 100) throws -> [AuditEntry] {
-        try auditLog.list(limit: limit, account: account)
+    public func getAuditLog(account: String? = nil, limit: Int = 100, offset: Int = 0) throws -> [AuditEntry] {
+        try auditLog.list(limit: limit, offset: offset, account: account)
     }
 
     // MARK: - Approved Recipients
@@ -492,7 +503,9 @@ public actor AccountOrchestrator {
         switch result {
         case .allowed: break
         case .blocked(let error): throw error
-        case .pendingApproval(let emails): throw ClawMailError.recipientPendingApproval(emails: emails)
+        case .pendingApproval(let emails):
+            onPendingApproval?(account, emails)
+            throw ClawMailError.recipientPendingApproval(emails: emails)
         }
     }
 

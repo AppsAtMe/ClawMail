@@ -143,6 +143,7 @@ public indirect enum IMAPSearchCriteria: Sendable, Equatable {
     case uid(ClosedRange<UInt32>)
     case larger(Int)
     case smaller(Int)
+    case hasAttachment
     case and(IMAPSearchCriteria, IMAPSearchCriteria)
     case or(IMAPSearchCriteria, IMAPSearchCriteria)
     case not(IMAPSearchCriteria)
@@ -170,6 +171,7 @@ public indirect enum IMAPSearchCriteria: Sendable, Equatable {
         case .uid(let range): return "UID \(range.lowerBound):\(range.upperBound)"
         case .larger(let n): return "LARGER \(n)"
         case .smaller(let n): return "SMALLER \(n)"
+        case .hasAttachment: return "HEADER Content-Type \"multipart/mixed\""
         case .and(let a, let b): return "\(a.commandString()) \(b.commandString())"
         case .or(let a, let b): return "OR (\(a.commandString())) (\(b.commandString()))"
         case .not(let c): return "NOT (\(c.commandString()))"

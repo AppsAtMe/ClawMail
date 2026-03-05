@@ -178,9 +178,15 @@ public actor IPCDispatcher {
         let bcc = optionalEmailAddresses(params, "bcc")
         let bodyHtml = optionalString(params, "bodyHtml")
 
+        var attachments: [String]? = nil
+        if case .array(let arr) = params["attachments"] {
+            attachments = arr.compactMap { if case .string(let s) = $0 { return s } else { return nil } }
+        }
+
         let request = SendEmailRequest(
             account: account, to: to, cc: cc, bcc: bcc,
-            subject: subject, body: body, bodyHtml: bodyHtml
+            subject: subject, body: body, bodyHtml: bodyHtml,
+            attachments: attachments
         )
         let messageId = try await orchestrator.sendMessage(request)
         return .dictionary(["messageId": .string(messageId)])
@@ -241,8 +247,8 @@ public actor IPCDispatcher {
         if case .array(let arr) = params["remove"] {
             removeFlags = arr.compactMap { if case .string(let s) = $0 { return EmailFlag(rawValue: s) } else { return nil } }
         }
-        try await orchestrator.updateFlags(account: account, id: id, add: addFlags, remove: removeFlags)
-        return .dictionary(["success": .bool(true)])
+        let updated = try await orchestrator.updateFlags(account: account, id: id, add: addFlags, remove: removeFlags)
+        return try encodableToValue(updated)
     }
 
     private func handleEmailSearch(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
@@ -413,7 +419,8 @@ public actor IPCDispatcher {
     private func handleAuditList(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
         let account = optionalString(params, "account")
         let limit = optionalInt(params, "limit") ?? 100
-        let entries = try await orchestrator.getAuditLog(account: account, limit: limit)
+        let offset = optionalInt(params, "offset") ?? 0
+        let entries = try await orchestrator.getAuditLog(account: account, limit: limit, offset: offset)
         return try encodableToValue(entries)
     }
 

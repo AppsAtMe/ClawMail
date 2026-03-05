@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 import ClawMailCore
 
 /// Manages the ClawMail daemon lifecycle: orchestrator, IPC server, REST API server.
@@ -91,6 +92,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     ))
                 }
             )
+
+            // Request notification permission (no-op if already granted)
+            let _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+
+            // Wire pending approval → macOS notification
+            await orchestrator.setPendingApprovalCallback { accountLabel, emails in
+                Task {
+                    let center = UNUserNotificationCenter.current()
+                    let content = UNMutableNotificationContent()
+                    content.title = "ClawMail: Recipient Approval Required"
+                    content.body = "Account \(accountLabel): \(emails.joined(separator: ", ")) need approval before sending."
+                    content.sound = .default
+                    let request = UNNotificationRequest(
+                        identifier: "pending-approval-\(UUID().uuidString)",
+                        content: content,
+                        trigger: nil
+                    )
+                    try? await center.add(request)
+                }
+            }
 
             // Retrieve API key for REST server
             let keychainManager = KeychainManager()

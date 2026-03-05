@@ -299,7 +299,8 @@ public actor EmailManager {
         try metadataIndex.deleteMessage(id: id, account: account.label)
     }
 
-    public func updateFlags(id: String, add: [EmailFlag] = [], remove: [EmailFlag] = []) async throws {
+    @discardableResult
+    public func updateFlags(id: String, add: [EmailFlag] = [], remove: [EmailFlag] = []) async throws -> EmailSummary {
         let (folder, uid) = try resolveMessageUid(id)
         try await imapClient.updateFlags(uid: uid, folder: folder, add: add, remove: remove)
 
@@ -307,7 +308,9 @@ public actor EmailManager {
             for flag in add { summary.flags.insert(flag) }
             for flag in remove { summary.flags.remove(flag) }
             try metadataIndex.upsertMessage(summary)
+            return summary
         }
+        throw ClawMailError.messageNotFound(id)
     }
 
     // MARK: - Search
@@ -548,6 +551,7 @@ public actor EmailManager {
         if query.isFlagged == true { criteria.append(.flagged) }
         if let before = query.before { criteria.append(.before(before)) }
         if let after = query.after { criteria.append(.since(after)) }
+        if query.hasAttachment == true { criteria.append(.hasAttachment) }
         if let freeText = query.freeText { criteria.append(.body(freeText)) }
 
         if criteria.isEmpty { return .all }

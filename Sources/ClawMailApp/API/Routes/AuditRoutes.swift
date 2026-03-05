@@ -15,7 +15,8 @@ enum AuditRoutes {
                 let qp = request.uri.queryParameters
                 let account = optionalQueryParam(qp, "account")
                 let limit = intQueryParam(qp, "limit", default: 100)
-                let entries = try await orchestrator.getAuditLog(account: account, limit: limit)
+                let offset = intQueryParam(qp, "offset", default: 0)
+                let entries = try await orchestrator.getAuditLog(account: account, limit: limit, offset: offset)
                 return jsonResponse(entries)
             } catch let error as ClawMailError {
                 return clawMailErrorResponse(error)

@@ -13,21 +13,66 @@ private final class TokenBox: @unchecked Sendable {
     }
 }
 
-/// Thread-safe box for storing channel references.
-/// Used by IPCServer from both NIO event loop threads and async contexts.
-private final class ChannelBox: @unchecked Sendable {
+/// IPC session type. CLI sessions are ephemeral and don't acquire the agent lock.
+/// Agent sessions (MCP) are exclusive — only one agent can be connected at a time.
+public enum IPCSessionType: String, Sendable {
+    case cli
+    case agent
+}
+
+/// Thread-safe tracker for connected IPC clients.
+/// Enforces exclusive agent sessions while allowing concurrent CLI sessions.
+private final class ConnectionTracker: @unchecked Sendable {
     private let lock = NSLock()
-    private var _server: Channel?
-    private var _client: Channel?
+    private var _serverChannel: Channel?
+    private var _agentChannel: Channel?
+    private var _cliChannels: Set<ObjectIdentifier> = []
 
     var serverChannel: Channel? {
-        get { lock.lock(); defer { lock.unlock() }; return _server }
-        set { lock.lock(); defer { lock.unlock() }; _server = newValue }
+        get { lock.lock(); defer { lock.unlock() }; return _serverChannel }
+        set { lock.lock(); defer { lock.unlock() }; _serverChannel = newValue }
     }
 
-    var clientChannel: Channel? {
-        get { lock.lock(); defer { lock.unlock() }; return _client }
-        set { lock.lock(); defer { lock.unlock() }; _client = newValue }
+    /// Try to register a new connection. Returns false if an agent session is
+    /// already active and the new connection is also an agent session.
+    func registerConnection(_ channel: Channel, sessionType: IPCSessionType) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        switch sessionType {
+        case .agent:
+            if _agentChannel != nil { return false }
+            _agentChannel = channel
+            return true
+        case .cli:
+            _cliChannels.insert(ObjectIdentifier(channel))
+            return true
+        }
+    }
+
+    func unregisterConnection(_ channel: Channel, sessionType: IPCSessionType) {
+        lock.lock()
+        defer { lock.unlock() }
+        switch sessionType {
+        case .agent:
+            if _agentChannel === channel {
+                _agentChannel = nil
+            }
+        case .cli:
+            _cliChannels.remove(ObjectIdentifier(channel))
+        }
+    }
+
+    var hasAgentConnection: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _agentChannel != nil
+    }
+
+    /// Returns the agent channel for sending notifications.
+    var agentChannel: Channel? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _agentChannel
     }
 }
 
@@ -35,12 +80,18 @@ private final class ChannelBox: @unchecked Sendable {
 ///
 /// The daemon (ClawMailApp) creates this server. CLI and MCP clients connect
 /// to it to interact with the AccountOrchestrator.
+///
+/// Session types:
+/// - `cli`: Ephemeral sessions for CLI commands. Multiple CLI sessions can
+///   connect concurrently. They do not acquire the agent lock.
+/// - `agent`: Exclusive sessions for MCP or long-lived agent connections.
+///   Only one agent session is allowed at a time. Acquires the agent lock.
 public final class IPCServer: Sendable {
 
     private let socketPath: String
     private let orchestrator: AccountOrchestrator
     private let group: EventLoopGroup
-    private let channels = ChannelBox()
+    private let connections = ConnectionTracker()
 
     /// IPC authentication token. Clients must send this in an `auth.handshake` message
     /// as their first request. Stored in a thread-safe box for Sendable conformance.
@@ -100,23 +151,27 @@ public final class IPCServer: Sendable {
             ofItemAtPath: tokenPath
         )
 
-        let handler = IPCServerHandler(orchestrator: orchestrator, server: self)
+        // Capture self references for the closure
+        let orchestratorRef = orchestrator
+        let serverRef = self
 
         let bootstrap = ServerBootstrap(group: group)
             .serverChannelOption(.backlog, value: 8)
             .childChannelInitializer { channel in
-                channel.pipeline.addHandler(ByteToMessageHandler(NewlineFrameDecoder())).flatMap {
+                // New handler per connection — each gets its own authenticated state
+                let handler = IPCServerHandler(orchestrator: orchestratorRef, server: serverRef)
+                return channel.pipeline.addHandler(ByteToMessageHandler(NewlineFrameDecoder())).flatMap {
                     channel.pipeline.addHandler(handler)
                 }
             }
 
         let channel = try await bootstrap.bind(unixDomainSocketPath: socketPath).get()
-        channels.serverChannel = channel
+        connections.serverChannel = channel
     }
 
     public func stop() async {
-        let ch = channels.serverChannel
-        channels.serverChannel = nil
+        let ch = connections.serverChannel
+        connections.serverChannel = nil
         let noPromise: EventLoopPromise<Void>? = nil
         ch?.close(mode: .all, promise: noPromise)
         try? await group.shutdownGracefully()
@@ -125,9 +180,10 @@ public final class IPCServer: Sendable {
         ipcToken = nil
     }
 
-    /// Send a notification to the connected client (if any).
+    /// Send a notification to the connected agent client (if any).
+    /// Notifications only go to agent sessions, not ephemeral CLI sessions.
     public func sendNotification(_ notification: JSONRPCNotification) {
-        guard let client = channels.clientChannel else { return }
+        guard let client = connections.agentChannel else { return }
         guard let data = try? encodeJSONRPC(notification) else { return }
         var buffer = client.allocator.buffer(capacity: data.count)
         buffer.writeBytes(data)
@@ -135,14 +191,20 @@ public final class IPCServer: Sendable {
         client.writeAndFlush(buffer, promise: noPromise)
     }
 
-    // MARK: - Internal client management
+    // MARK: - Internal connection management
 
-    func setClient(_ channel: Channel?) {
-        channels.clientChannel = channel
+    /// Try to register a connection with the given session type.
+    /// Returns false if an agent session is already active and this is also an agent session.
+    func registerConnection(_ channel: Channel, sessionType: IPCSessionType) -> Bool {
+        connections.registerConnection(channel, sessionType: sessionType)
     }
 
-    func getClient() -> Channel? {
-        channels.clientChannel
+    func unregisterConnection(_ channel: Channel, sessionType: IPCSessionType) {
+        connections.unregisterConnection(channel, sessionType: sessionType)
+    }
+
+    var hasAgentConnection: Bool {
+        connections.hasAgentConnection
     }
 }
 
@@ -178,6 +240,8 @@ final class NewlineFrameDecoder: ByteToMessageDecoder, Sendable {
 // MARK: - IPC Server Channel Handler
 
 /// Handles a single client connection, dispatching JSON-RPC requests to the orchestrator.
+/// Created per-connection inside `childChannelInitializer` — each connection gets its own
+/// `authenticated` flag and `sessionType`.
 final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = ByteBuffer
     typealias OutboundOut = ByteBuffer
@@ -186,6 +250,7 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
     private let server: IPCServer
     private let dispatcher: IPCDispatcher
     private var authenticated = false
+    private var sessionType: IPCSessionType = .cli
 
     init(orchestrator: AccountOrchestrator, server: IPCServer) {
         self.orchestrator = orchestrator
@@ -194,30 +259,19 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
     }
 
     func channelActive(context: ChannelHandlerContext) {
-        // Only allow one client at a time
-        if server.getClient() != nil {
-            let errorResponse = JSONRPCResponse.error(
-                id: nil, code: JSONRPCError.agentAlreadyConnected,
-                message: "Another agent session is already active"
-            )
-            if let responseData = try? encodeJSONRPC(errorResponse) {
-                var buffer = context.channel.allocator.buffer(capacity: responseData.count)
-                buffer.writeBytes(responseData)
-                let noPromise: EventLoopPromise<Void>? = nil
-                context.writeAndFlush(wrapOutboundOut(buffer), promise: noPromise)
-            }
-            let noPromise: EventLoopPromise<Void>? = nil
-            context.close(promise: noPromise)
-            return
-        }
-
-        server.setClient(context.channel)
+        // Connection accepted — session type determined during handshake.
+        // No rejection at this stage; the handshake decides whether to allow
+        // the connection based on session type.
     }
 
     func channelInactive(context: ChannelHandlerContext) {
-        server.setClient(nil)
-        Task {
-            await orchestrator.releaseAgentLock()
+        if authenticated {
+            server.unregisterConnection(context.channel, sessionType: sessionType)
+            if sessionType == .agent {
+                Task {
+                    await orchestrator.releaseAgentLock()
+                }
+            }
         }
     }
 
@@ -247,7 +301,11 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
         }
     }
 
-    /// Validate the client's handshake message containing the IPC token.
+    /// Validate the client's handshake message containing the IPC token and session type.
+    ///
+    /// The handshake now accepts an optional `"type"` parameter:
+    /// - `"cli"` (default): Ephemeral session, no agent lock, concurrent connections allowed.
+    /// - `"agent"`: Exclusive session, acquires agent lock, rejects if another agent is connected.
     private func handleHandshake(_ data: Data, context: ChannelHandlerContext) {
         guard let request = try? decodeJSONRPC(JSONRPCRequest.self, from: data),
               request.method == "auth.handshake" else {
@@ -259,6 +317,7 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
             return
         }
 
+        // Validate token
         guard let params = request.params,
               case .string(let token) = params["token"],
               let expected = server.ipcToken,
@@ -271,8 +330,41 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
             return
         }
 
+        // Determine session type from handshake params (default: cli)
+        let requestedType: IPCSessionType
+        if case .string(let typeStr) = params["type"], typeStr == "agent" {
+            requestedType = .agent
+        } else {
+            requestedType = .cli
+        }
+
+        // Try to register the connection
+        guard server.registerConnection(context.channel, sessionType: requestedType) else {
+            let resp = JSONRPCResponse.error(
+                id: request.id, code: JSONRPCError.agentAlreadyConnected,
+                message: "Another agent session is already active"
+            )
+            sendAndClose(resp, context: context)
+            return
+        }
+
+        self.sessionType = requestedType
         authenticated = true
-        let resp = JSONRPCResponse.success(id: request.id, result: .dictionary(["ok": .bool(true)]))
+
+        // Agent sessions acquire the orchestrator lock
+        if requestedType == .agent {
+            Task {
+                _ = await orchestrator.acquireAgentLock(interface: .mcp)
+            }
+        }
+
+        let resp = JSONRPCResponse.success(
+            id: request.id,
+            result: .dictionary([
+                "ok": .bool(true),
+                "sessionType": .string(requestedType.rawValue),
+            ])
+        )
         if let responseData = try? encodeJSONRPC(resp) {
             var outBuffer = context.channel.allocator.buffer(capacity: responseData.count)
             outBuffer.writeBytes(responseData)

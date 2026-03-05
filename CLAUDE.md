@@ -89,7 +89,6 @@ The blueprint (BLUEPRINT.md) includes an agent team orchestration section. Key p
 
 ## Known Limitations
 
-- **IPC single-client**: Only one CLI/MCP client can connect at a time. Back-to-back CLI commands may fail. Use REST API (`localhost:24601/api/v1/...`) for reliable concurrent access. See `.claude/handoff.md` for fix options.
-- **IPC handler shared instance**: `IPCServerHandler` in `IPCServer.swift` is created once and shared across connections — `authenticated` flag leaks between sessions. Fix: create handler inside `childChannelInitializer`.
+- **IPC agent exclusivity**: Only one agent (MCP) session at a time. CLI sessions are concurrent and can coexist with an active agent. See `IPCSessionType` in `IPCServer.swift`.
 - **Gmail requires App Passwords**: Regular passwords rejected with `5.7.8 BadCredentials`.
 - **NIO error display**: Always use `String(describing: error)` not `error.localizedDescription` for NIO errors — Foundation produces generic "error N" messages.

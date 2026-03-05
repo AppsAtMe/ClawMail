@@ -4,6 +4,9 @@ import NIO
 /// Client that connects to the ClawMail daemon via Unix domain socket.
 ///
 /// Used by CLI and MCP executables to communicate with the running daemon.
+/// Supports two session types:
+/// - `.cli` (default): Ephemeral, doesn't acquire agent lock, concurrent connections allowed.
+/// - `.agent`: Exclusive, acquires agent lock, only one at a time.
 public final class IPCClient: @unchecked Sendable {
 
     private let socketPath: String
@@ -12,18 +15,22 @@ public final class IPCClient: @unchecked Sendable {
     private var channel: Channel?
     private let responseHandler: IPCClientHandler
 
+    /// The session type to use when connecting. Set before calling `connect()`.
+    public var sessionType: IPCSessionType
+
     /// Callback for receiving notifications from the server.
     public var onNotification: (@Sendable (JSONRPCNotification) -> Void)?
 
     private var nextId: Int = 1
 
-    public init(socketPath: String? = nil, tokenPath: String? = nil) {
+    public init(socketPath: String? = nil, tokenPath: String? = nil, sessionType: IPCSessionType = .cli) {
         let sock = socketPath ?? IPCServer.defaultSocketPath
         self.socketPath = sock
         // Default: token file is co-located with the socket
         self.tokenPath = tokenPath ?? ((sock as NSString).deletingLastPathComponent as NSString).appendingPathComponent("ipc.token")
         self.group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         self.responseHandler = IPCClientHandler()
+        self.sessionType = sessionType
     }
 
     // MARK: - Connection
@@ -63,17 +70,30 @@ public final class IPCClient: @unchecked Sendable {
 
         let response = try await send(
             method: "auth.handshake",
-            params: ["token": .string(token)]
+            params: [
+                "token": .string(token),
+                "type": .string(sessionType.rawValue),
+            ]
         )
         if let error = response.error {
             throw ClawMailError.authFailed("IPC handshake failed: \(error.message)")
         }
     }
 
+    /// Gracefully disconnect from the daemon.
+    /// Waits for the channel close to complete before returning, ensuring the
+    /// server-side `channelInactive` fires before the process exits.
     public func disconnect() async {
-        let noPromise: EventLoopPromise<Void>? = nil
-        channel?.close(promise: noPromise)
+        guard let ch = channel else {
+            try? await group.shutdownGracefully()
+            return
+        }
         channel = nil
+        do {
+            try await ch.close().get()
+        } catch {
+            // Channel may already be closed by the server
+        }
         try? await group.shutdownGracefully()
     }
 

@@ -57,7 +57,7 @@ final class MCPServer: Sendable {
     private let resourceHandler: MCPResourceHandler
 
     init() {
-        let client = IPCClient()
+        let client = IPCClient(sessionType: .agent)
         self.ipcClient = client
         self.writer = StdoutWriter()
         self.toolDispatcher = MCPToolDispatcher(ipcClient: client)

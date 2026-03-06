@@ -7,6 +7,7 @@ struct AccountsTab: View {
     @State private var selectedAccountId: UUID?
     @State private var showingSetup = false
     @State private var showingDeleteConfirm = false
+    @State private var errorState: UIErrorState?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -84,6 +85,11 @@ struct AccountsTab: View {
                 Text("Remove \"\(account.label)\"? This will disconnect the account and remove its local data.")
             }
         }
+        .alert("Operation Failed", isPresented: showingErrorAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorState?.message ?? "Unknown error.")
+        }
     }
 
     private var selectedAccount: Account? {
@@ -92,10 +98,23 @@ struct AccountsTab: View {
 
     private func removeAccount(_ account: Account) {
         Task {
-            try? await appState.orchestrator?.removeAccount(label: account.label)
-            await appState.refreshAccounts()
-            selectedAccountId = nil
+            do {
+                try await appState.orchestrator?.removeAccount(label: account.label)
+                await appState.refreshAccounts()
+                selectedAccountId = nil
+            } catch {
+                await MainActor.run {
+                    errorState = UIErrorState(action: "Removing account", error: error)
+                }
+            }
         }
+    }
+
+    private var showingErrorAlert: Binding<Bool> {
+        Binding(
+            get: { errorState != nil },
+            set: { if !$0 { errorState = nil } }
+        )
     }
 
     private func statusColor(for status: ConnectionStatus) -> Color {

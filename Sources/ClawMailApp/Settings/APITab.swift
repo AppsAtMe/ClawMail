@@ -15,6 +15,7 @@ struct APITab: View {
     @State private var googleClientSecret: String = ""
     @State private var microsoftClientId: String = ""
     @State private var microsoftClientSecret: String = ""
+    @State private var errorState: UIErrorState?
 
     var body: some View {
         Form {
@@ -25,8 +26,12 @@ struct APITab: View {
                         .frame(width: 100)
                         .onChange(of: port) { _, newValue in
                             if let portNum = Int(newValue), portNum > 0, portNum <= 65535 {
-                                appState.config.restApiPort = portNum
-                                try? appState.config.save()
+                                if !persistConfigChange(
+                                    "Saving REST API port",
+                                    update: { $0.restApiPort = portNum }
+                                ) {
+                                    loadState()
+                                }
                             }
                         }
                 }
@@ -136,8 +141,12 @@ struct APITab: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(minWidth: 280)
                         .onChange(of: googleClientId) { _, newValue in
-                            appState.config.oauthGoogleClientId = newValue.isEmpty ? nil : newValue
-                            try? appState.config.save()
+                            if !persistConfigChange(
+                                "Saving Google OAuth client ID",
+                                update: { $0.oauthGoogleClientId = newValue.isEmpty ? nil : newValue }
+                            ) {
+                                loadState()
+                            }
                         }
                 }
 
@@ -148,10 +157,17 @@ struct APITab: View {
                         .onChange(of: googleClientSecret) { _, newValue in
                             Task {
                                 let km = KeychainManager()
-                                if newValue.isEmpty {
-                                    try? await km.deleteOAuthClientSecret(for: .google)
-                                } else {
-                                    try? await km.saveOAuthClientSecret(newValue, for: .google)
+                                do {
+                                    if newValue.isEmpty {
+                                        try await km.deleteOAuthClientSecret(for: .google)
+                                    } else {
+                                        try await km.saveOAuthClientSecret(newValue, for: .google)
+                                    }
+                                } catch {
+                                    await MainActor.run {
+                                        errorState = UIErrorState(action: "Saving Google OAuth client secret", error: error)
+                                        loadState()
+                                    }
                                 }
                             }
                         }
@@ -162,8 +178,12 @@ struct APITab: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(minWidth: 280)
                         .onChange(of: microsoftClientId) { _, newValue in
-                            appState.config.oauthMicrosoftClientId = newValue.isEmpty ? nil : newValue
-                            try? appState.config.save()
+                            if !persistConfigChange(
+                                "Saving Microsoft OAuth client ID",
+                                update: { $0.oauthMicrosoftClientId = newValue.isEmpty ? nil : newValue }
+                            ) {
+                                loadState()
+                            }
                         }
                 }
 
@@ -174,10 +194,17 @@ struct APITab: View {
                         .onChange(of: microsoftClientSecret) { _, newValue in
                             Task {
                                 let km = KeychainManager()
-                                if newValue.isEmpty {
-                                    try? await km.deleteOAuthClientSecret(for: .microsoft)
-                                } else {
-                                    try? await km.saveOAuthClientSecret(newValue, for: .microsoft)
+                                do {
+                                    if newValue.isEmpty {
+                                        try await km.deleteOAuthClientSecret(for: .microsoft)
+                                    } else {
+                                        try await km.saveOAuthClientSecret(newValue, for: .microsoft)
+                                    }
+                                } catch {
+                                    await MainActor.run {
+                                        errorState = UIErrorState(action: "Saving Microsoft OAuth client secret", error: error)
+                                        loadState()
+                                    }
                                 }
                             }
                         }
@@ -188,8 +215,12 @@ struct APITab: View {
                 TextField("Webhook URL (optional)", text: $webhookURL)
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: webhookURL) { _, newValue in
-                        appState.config.webhookURL = newValue.isEmpty ? nil : newValue
-                        try? appState.config.save()
+                        if !persistConfigChange(
+                            "Saving webhook URL",
+                            update: { $0.webhookURL = newValue.isEmpty ? nil : newValue }
+                        ) {
+                            loadState()
+                        }
                     }
                 Text("Sends POST notifications when new email arrives.")
                     .font(.caption)
@@ -199,6 +230,11 @@ struct APITab: View {
         .formStyle(.grouped)
         .padding()
         .onAppear { loadState() }
+        .alert("Operation Failed", isPresented: showingErrorAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorState?.message ?? "Unknown error.")
+        }
     }
 
     private func loadState() {
@@ -223,9 +259,39 @@ struct APITab: View {
     private func regenerateAPIKey() {
         Task {
             let km = KeychainManager()
-            if let newKey = try? await km.generateAPIKey() {
+            do {
+                let newKey = try await km.generateAPIKey()
                 await MainActor.run { apiKey = newKey }
+            } catch {
+                await MainActor.run {
+                    errorState = UIErrorState(action: "Regenerating API key", error: error)
+                }
             }
+        }
+    }
+
+    private var showingErrorAlert: Binding<Bool> {
+        Binding(
+            get: { errorState != nil },
+            set: { if !$0 { errorState = nil } }
+        )
+    }
+
+    @discardableResult
+    private func persistConfigChange(
+        _ action: String,
+        update: (inout AppConfig) -> Void
+    ) -> Bool {
+        var updatedConfig = appState.config
+        update(&updatedConfig)
+
+        do {
+            try updatedConfig.save()
+            appState.config = updatedConfig
+            return true
+        } catch {
+            errorState = UIErrorState(action: action, error: error)
+            return false
         }
     }
 }

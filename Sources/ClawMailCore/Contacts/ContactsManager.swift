@@ -119,26 +119,22 @@ public actor ContactsManager {
         let books = try await client.listAddressBooks()
 
         var foundBook: CardDAVAddressBook?
-        var foundVCardString: String?
+        var foundResource: CardDAVResource?
 
         for book in books {
-            let vcardStrings = try await client.getContacts(addressBook: book.href)
-            for vcs in vcardStrings {
-                if let uid = VCardParser.extractUID(from: vcs), uid == id {
-                    foundBook = book
-                    foundVCardString = vcs
-                    break
-                }
+            if let resource = try await client.findContact(addressBook: book.href, uid: id) {
+                foundBook = book
+                foundResource = resource
+                break
             }
-            if foundBook != nil { break }
         }
 
-        guard let book = foundBook, let existingVCard = foundVCardString else {
+        guard let book = foundBook, let resource = foundResource else {
             throw ClawMailError.invalidParameter("Contact with ID '\(id)' not found")
         }
 
         // Parse existing contact and apply updates
-        let existingContacts = VCardParser.parseContacts(from: existingVCard)
+        let existingContacts = VCardParser.parseContacts(from: resource.addressData)
         guard let existing = existingContacts.first else {
             throw ClawMailError.serverError("Failed to parse existing contact")
         }
@@ -176,7 +172,7 @@ public actor ContactsManager {
             notes: newNotes
         )
 
-        try await client.updateContact(addressBook: book.href, uid: id, vcard: updatedVCard)
+        try await client.updateContact(resourceHref: resource.href, vcard: updatedVCard)
 
         let resultEmails: [ContactEmail]
         if let requestEmails = request.emails {
@@ -211,12 +207,9 @@ public actor ContactsManager {
         let books = try await client.listAddressBooks()
 
         for book in books {
-            let vcardStrings = try await client.getContacts(addressBook: book.href)
-            for vcs in vcardStrings {
-                if let uid = VCardParser.extractUID(from: vcs), uid == id {
-                    try await client.deleteContact(addressBook: book.href, uid: id)
-                    return
-                }
+            if let resource = try await client.findContact(addressBook: book.href, uid: id) {
+                try await client.deleteContact(resourceHref: resource.href)
+                return
             }
         }
 

@@ -115,30 +115,22 @@ public actor CalendarManager {
         let eventCalendars = calendars.filter { $0.supportsEvents }
 
         var foundCalendar: CalDAVCalendar?
-        var foundICalString: String?
-
-        // Search all calendars for the event with this UID
-        let farPast = Date.distantPast
-        let farFuture = Date.distantFuture
+        var foundResource: CalDAVResource?
 
         for cal in eventCalendars {
-            let icalStrings = try await client.getEvents(calendar: cal.href, from: farPast, to: farFuture)
-            for ics in icalStrings {
-                if let uid = ICalendarParser.extractUID(from: ics), uid == id {
-                    foundCalendar = cal
-                    foundICalString = ics
-                    break
-                }
+            if let resource = try await client.findEvent(calendar: cal.href, uid: id) {
+                foundCalendar = cal
+                foundResource = resource
+                break
             }
-            if foundCalendar != nil { break }
         }
 
-        guard let cal = foundCalendar, let existingICS = foundICalString else {
+        guard let cal = foundCalendar, let resource = foundResource else {
             throw ClawMailError.invalidParameter("Event with ID '\(id)' not found")
         }
 
         // Parse existing event and apply updates
-        let existingEvents = ICalendarParser.parseEvents(from: existingICS)
+        let existingEvents = ICalendarParser.parseEvents(from: resource.calendarData)
         guard let existing = existingEvents.first else {
             throw ClawMailError.serverError("Failed to parse existing event")
         }
@@ -178,7 +170,7 @@ public actor CalendarManager {
             reminders: reminderMinutes
         )
 
-        try await client.updateEvent(calendar: cal.href, uid: id, icalendar: updatedICal)
+        try await client.updateEvent(resourceHref: resource.href, icalendar: updatedICal)
 
         let updatedAttendees: [EventAttendee]
         if let requestAttendees = request.attendees {
@@ -213,16 +205,10 @@ public actor CalendarManager {
         let calendars = try await client.listCalendars()
         let eventCalendars = calendars.filter { $0.supportsEvents }
 
-        let farPast = Date.distantPast
-        let farFuture = Date.distantFuture
-
         for cal in eventCalendars {
-            let icalStrings = try await client.getEvents(calendar: cal.href, from: farPast, to: farFuture)
-            for ics in icalStrings {
-                if let uid = ICalendarParser.extractUID(from: ics), uid == id {
-                    try await client.deleteEvent(calendar: cal.href, uid: id)
-                    return
-                }
+            if let resource = try await client.findEvent(calendar: cal.href, uid: id) {
+                try await client.deleteEvent(resourceHref: resource.href)
+                return
             }
         }
 

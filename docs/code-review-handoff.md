@@ -6,6 +6,42 @@ Purpose: Carry forward a full review into a fresh session with enough context to
 
 ## Session Update (March 6, 2026, newest latest)
 
+This handoff now reflects follow-up fixes for the remaining lower-level review observations that were still open after the pending-approval workflow work.
+
+Completed in this session:
+- Calendar, contact, and task update/delete flows now use UID-targeted DAV `REPORT` queries to locate the exact remote resource before mutating it.
+- DAV writes now use the server-reported resource `href` instead of assuming objects live at `/<UID>.ics` or `/<UID>.vcf`.
+- Settings/UI paths that previously swallowed important save/action failures now surface user-visible error alerts in the Accounts, Activity Log, API, General, and Guardrails tabs.
+- README security claims were re-audited and updated to match the March 6 hardening work around HTTPS-only DAV, same-origin DAV follow-up validation, held-send approvals, and symlink-aware attachment path enforcement.
+
+Current build/test status after these fixes:
+- `swift build`: passed
+- `swift test`: passed
+- Test suite reported 162 passing tests across 23 suites
+
+New tests added in this session:
+- `Tests/ClawMailCoreTests/DAVResourceLookupTests.swift`
+
+Key implementation files changed in this session:
+- `Sources/ClawMailCore/Calendar/CalDAVClient.swift`
+- `Sources/ClawMailCore/Calendar/CalendarManager.swift`
+- `Sources/ClawMailCore/Contacts/CardDAVClient.swift`
+- `Sources/ClawMailCore/Contacts/ContactsManager.swift`
+- `Sources/ClawMailCore/Tasks/TaskManager.swift`
+- `Sources/ClawMailApp/UIErrorState.swift`
+- `Sources/ClawMailApp/Settings/AccountsTab.swift`
+- `Sources/ClawMailApp/Settings/ActivityLogTab.swift`
+- `Sources/ClawMailApp/Settings/APITab.swift`
+- `Sources/ClawMailApp/Settings/GeneralTab.swift`
+- `Sources/ClawMailApp/Settings/GuardrailsTab.swift`
+- `README.md`
+
+Next issue to start with:
+- No confirmed findings remain from the original March 6 review handoff.
+- If continuing, the next sensible follow-up would be UI-level coverage for the new settings error alerts or a sweep of the remaining low-risk `try?` uses outside settings flows.
+
+## Session Update (March 6, 2026, newest latest)
+
 This handoff now reflects fixes through the pending-approval workflow observation that was still open after issues 1-10.
 
 Completed in this session:

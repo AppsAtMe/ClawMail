@@ -240,13 +240,13 @@ Set `webhookURL` in Settings > API to receive HTTP POST notifications when new m
 ## Security
 
 - **Credentials**: Stored in macOS Keychain with `.afterFirstUnlockThisDeviceOnly` — never synced to iCloud
-- **TLS**: Required for all IMAP/SMTP/CalDAV/CardDAV connections
+- **TLS**: Required for all IMAP/SMTP/CalDAV/CardDAV connections; DAV endpoints must use HTTPS
 - **REST API**: Bound to localhost only, authenticated via API key, rate-limited (120 req/min)
 - **IPC**: Token file with 0600 permissions, peer PID verification, socket directory chmod 0700
-- **Guardrails**: Configurable send rate limits, domain allow/blocklists, first-time recipient approval
+- **Guardrails**: Configurable send rate limits, domain allow/blocklists, and account-scoped first-time recipient approval with explicit held-send review
 - **Audit**: Every agent write operation is logged with timestamp, action, account, and parameters
-- **Input validation**: IMAP/SMTP injection prevention, FTS5 query sanitization, path traversal blocking
-- **Attachment security**: Downloads restricted to `~/Downloads`, `~/Documents`, `~/Desktop`, and temp. Reads blocked from `/etc`, `.ssh`, `.gnupg`, Keychains.
+- **Input validation**: IMAP/SMTP injection prevention, FTS5 query sanitization, DAV same-origin follow-up URL validation, and path traversal blocking
+- **Attachment security**: Attachment path checks resolve symlinks before enforcement. Downloads are restricted to `~/Downloads`, `~/Documents`, `~/Desktop`, and temp. Reads are blocked from system paths plus sensitive home directories such as `.ssh`, `.gnupg`, `.config`, `.aws`, Keychains, and ClawMail's own app-support directory.
 
 ## Building & Testing
 

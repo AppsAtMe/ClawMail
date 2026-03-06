@@ -28,6 +28,11 @@ public struct CalDAVCalendar: Codable, Sendable, Equatable {
     }
 }
 
+struct CalDAVResource: Sendable, Equatable {
+    var href: String
+    var calendarData: String
+}
+
 /// Credential used for CalDAV authentication.
 public enum CalDAVCredential: Sendable {
     case password(username: String, password: String)
@@ -197,6 +202,29 @@ public actor CalDAVClient {
         return responses.compactMap { $0.calendarData }
     }
 
+    func findEvent(calendar: String, uid: String) async throws -> CalDAVResource? {
+        let calURL = try resolveServerURL(calendar, context: "findEvent calendar")
+
+        var request = URLRequest(url: calURL)
+        request.httpMethod = "REPORT"
+        request.setValue("1", forHTTPHeaderField: "Depth")
+        request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        try await applyAuth(to: &request)
+        request.httpBody = WebDAVXMLBuilder.calendarUIDQuery(componentType: "VEVENT", uid: uid).data(using: .utf8)
+
+        let (data, response) = try await session.data(for: request)
+        try validateResponse(response, context: "findEvent")
+
+        let responses = WebDAVResponseParser.parse(data: data)
+        for item in responses {
+            guard let calendarData = item.calendarData else { continue }
+            let hrefURL = try resolveServerURL(item.href, context: "findEvent href")
+            return CalDAVResource(href: hrefURL.path, calendarData: calendarData)
+        }
+
+        return nil
+    }
+
     /// Create a new event in a calendar. Returns the href of the created resource.
     public func createEvent(calendar: String, icalendar: String) async throws -> String {
         let uid = ICalendarParser.extractUID(from: icalendar) ?? UUID().uuidString
@@ -219,7 +247,11 @@ public actor CalDAVClient {
     /// Update an existing event.
     public func updateEvent(calendar: String, uid: String, icalendar: String) async throws {
         let resourcePath = calendar.hasSuffix("/") ? "\(calendar)\(uid).ics" : "\(calendar)/\(uid).ics"
-        let resourceURL = try resolveServerURL(resourcePath, context: "updateEvent resource")
+        try await updateEvent(resourceHref: resourcePath, icalendar: icalendar)
+    }
+
+    func updateEvent(resourceHref: String, icalendar: String) async throws {
+        let resourceURL = try resolveServerURL(resourceHref, context: "updateEvent resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "PUT"
@@ -234,7 +266,11 @@ public actor CalDAVClient {
     /// Delete an event by UID.
     public func deleteEvent(calendar: String, uid: String) async throws {
         let resourcePath = calendar.hasSuffix("/") ? "\(calendar)\(uid).ics" : "\(calendar)/\(uid).ics"
-        let resourceURL = try resolveServerURL(resourcePath, context: "deleteEvent resource")
+        try await deleteEvent(resourceHref: resourcePath)
+    }
+
+    func deleteEvent(resourceHref: String) async throws {
+        let resourceURL = try resolveServerURL(resourceHref, context: "deleteEvent resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "DELETE"
@@ -272,6 +308,33 @@ public actor CalDAVClient {
         return responses.compactMap { $0.calendarData }
     }
 
+    func findTask(taskList: String, uid: String, includeCompleted: Bool = true) async throws -> CalDAVResource? {
+        let listURL = try resolveServerURL(taskList, context: "findTask task list")
+
+        var request = URLRequest(url: listURL)
+        request.httpMethod = "REPORT"
+        request.setValue("1", forHTTPHeaderField: "Depth")
+        request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        try await applyAuth(to: &request)
+        request.httpBody = WebDAVXMLBuilder.calendarUIDQuery(
+            componentType: "VTODO",
+            uid: uid,
+            includeCompleted: includeCompleted
+        ).data(using: .utf8)
+
+        let (data, response) = try await session.data(for: request)
+        try validateResponse(response, context: "findTask")
+
+        let responses = WebDAVResponseParser.parse(data: data)
+        for item in responses {
+            guard let calendarData = item.calendarData else { continue }
+            let hrefURL = try resolveServerURL(item.href, context: "findTask href")
+            return CalDAVResource(href: hrefURL.path, calendarData: calendarData)
+        }
+
+        return nil
+    }
+
     /// Create a new task. Returns the href of the created resource.
     public func createTask(taskList: String, icalendar: String) async throws -> String {
         let uid = ICalendarParser.extractUID(from: icalendar) ?? UUID().uuidString
@@ -294,7 +357,11 @@ public actor CalDAVClient {
     /// Update an existing task.
     public func updateTask(taskList: String, uid: String, icalendar: String) async throws {
         let resourcePath = taskList.hasSuffix("/") ? "\(taskList)\(uid).ics" : "\(taskList)/\(uid).ics"
-        let resourceURL = try resolveServerURL(resourcePath, context: "updateTask resource")
+        try await updateTask(resourceHref: resourcePath, icalendar: icalendar)
+    }
+
+    func updateTask(resourceHref: String, icalendar: String) async throws {
+        let resourceURL = try resolveServerURL(resourceHref, context: "updateTask resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "PUT"
@@ -309,7 +376,11 @@ public actor CalDAVClient {
     /// Delete a task by UID.
     public func deleteTask(taskList: String, uid: String) async throws {
         let resourcePath = taskList.hasSuffix("/") ? "\(taskList)\(uid).ics" : "\(taskList)/\(uid).ics"
-        let resourceURL = try resolveServerURL(resourcePath, context: "deleteTask resource")
+        try await deleteTask(resourceHref: resourcePath)
+    }
+
+    func deleteTask(resourceHref: String) async throws {
+        let resourceURL = try resolveServerURL(resourceHref, context: "deleteTask resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "DELETE"
@@ -465,6 +536,50 @@ enum WebDAVXMLBuilder: Sendable {
           </c:filter>
         </c:calendar-query>
         """
+    }
+
+    static func calendarUIDQuery(componentType: String, uid: String, includeCompleted: Bool = true) -> String {
+        let escapedUID = xmlEscape(uid)
+
+        var filterContent = """
+                <c:prop-filter name="UID">
+                  <c:text-match collation="i;octet">\(escapedUID)</c:text-match>
+                </c:prop-filter>
+        """
+
+        if componentType == "VTODO", !includeCompleted {
+            filterContent += """
+
+                <c:prop-filter name="STATUS">
+                  <c:text-match negate-condition="yes">COMPLETED</c:text-match>
+                </c:prop-filter>
+            """
+        }
+
+        return """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+          <d:prop>
+            <d:getetag/>
+            <c:calendar-data/>
+          </d:prop>
+          <c:filter>
+            <c:comp-filter name="VCALENDAR">
+              <c:comp-filter name="\(componentType)">
+        \(filterContent)
+              </c:comp-filter>
+            </c:comp-filter>
+          </c:filter>
+        </c:calendar-query>
+        """
+    }
+
+    private static func xmlEscape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
     }
 }
 

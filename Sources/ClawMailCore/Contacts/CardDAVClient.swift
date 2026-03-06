@@ -16,6 +16,11 @@ public struct CardDAVAddressBook: Codable, Sendable, Equatable {
     }
 }
 
+struct CardDAVResource: Sendable, Equatable {
+    var href: String
+    var addressData: String
+}
+
 /// Credential used for CardDAV authentication.
 public enum CardDAVCredential: Sendable {
     case password(username: String, password: String)
@@ -176,6 +181,29 @@ public actor CardDAVClient {
         return responses.compactMap { $0.addressData }
     }
 
+    func findContact(addressBook: String, uid: String) async throws -> CardDAVResource? {
+        let bookURL = try resolveServerURL(addressBook, context: "findContact address book")
+
+        var request = URLRequest(url: bookURL)
+        request.httpMethod = "REPORT"
+        request.setValue("1", forHTTPHeaderField: "Depth")
+        request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        try await applyAuth(to: &request)
+        request.httpBody = CardDAVXMLBuilder.addressbookUIDQuery(uid: uid).data(using: .utf8)
+
+        let (data, response) = try await session.data(for: request)
+        try validateResponse(response, context: "findContact")
+
+        let responses = CardDAVResponseParser.parse(data: data)
+        for item in responses {
+            guard let addressData = item.addressData else { continue }
+            let hrefURL = try resolveServerURL(item.href, context: "findContact href")
+            return CardDAVResource(href: hrefURL.path, addressData: addressData)
+        }
+
+        return nil
+    }
+
     /// Create a new contact. Returns the href of the created resource.
     public func createContact(addressBook: String, vcard: String) async throws -> String {
         let uid = VCardParser.extractUID(from: vcard) ?? UUID().uuidString
@@ -198,7 +226,11 @@ public actor CardDAVClient {
     /// Update an existing contact.
     public func updateContact(addressBook: String, uid: String, vcard: String) async throws {
         let resourcePath = addressBook.hasSuffix("/") ? "\(addressBook)\(uid).vcf" : "\(addressBook)/\(uid).vcf"
-        let resourceURL = try resolveServerURL(resourcePath, context: "updateContact resource")
+        try await updateContact(resourceHref: resourcePath, vcard: vcard)
+    }
+
+    func updateContact(resourceHref: String, vcard: String) async throws {
+        let resourceURL = try resolveServerURL(resourceHref, context: "updateContact resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "PUT"
@@ -213,7 +245,11 @@ public actor CardDAVClient {
     /// Delete a contact by UID.
     public func deleteContact(addressBook: String, uid: String) async throws {
         let resourcePath = addressBook.hasSuffix("/") ? "\(addressBook)\(uid).vcf" : "\(addressBook)/\(uid).vcf"
-        let resourceURL = try resolveServerURL(resourcePath, context: "deleteContact resource")
+        try await deleteContact(resourceHref: resourcePath)
+    }
+
+    func deleteContact(resourceHref: String) async throws {
+        let resourceURL = try resolveServerURL(resourceHref, context: "deleteContact resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "DELETE"
@@ -357,6 +393,33 @@ enum CardDAVXMLBuilder: Sendable {
           </card:filter>
         </card:addressbook-query>
         """
+    }
+
+    static func addressbookUIDQuery(uid: String) -> String {
+        let escapedUID = xmlEscape(uid)
+
+        return """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <card:addressbook-query xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+          <d:prop>
+            <d:getetag/>
+            <card:address-data/>
+          </d:prop>
+          <card:filter>
+            <card:prop-filter name="UID">
+              <card:text-match collation="i;unicode-casemap" match-type="equals">\(escapedUID)</card:text-match>
+            </card:prop-filter>
+          </card:filter>
+        </card:addressbook-query>
+        """
+    }
+
+    private static func xmlEscape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
     }
 }
 

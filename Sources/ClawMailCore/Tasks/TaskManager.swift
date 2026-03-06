@@ -121,27 +121,22 @@ public actor TaskManager {
         let taskLists = try await client.listTaskLists()
 
         var foundList: CalDAVCalendar?
-        var foundICalString: String?
+        var foundResource: CalDAVResource?
 
         for list in taskLists {
-            let icalStrings = try await client.getTasks(taskList: list.href, includeCompleted: true)
-            for ics in icalStrings {
-                let parsed = VTODOParser.parseTasks(from: ics)
-                if parsed.contains(where: { $0.uid == id }) {
-                    foundList = list
-                    foundICalString = ics
-                    break
-                }
+            if let resource = try await client.findTask(taskList: list.href, uid: id, includeCompleted: true) {
+                foundList = list
+                foundResource = resource
+                break
             }
-            if foundList != nil { break }
         }
 
-        guard let list = foundList, let existingICS = foundICalString else {
+        guard let list = foundList, let resource = foundResource else {
             throw ClawMailError.invalidParameter("Task with ID '\(id)' not found")
         }
 
         // Parse existing task and apply updates
-        let existingTodos = VTODOParser.parseTasks(from: existingICS)
+        let existingTodos = VTODOParser.parseTasks(from: resource.calendarData)
         guard let existing = existingTodos.first(where: { $0.uid == id }) else {
             throw ClawMailError.serverError("Failed to parse existing task")
         }
@@ -163,7 +158,7 @@ public actor TaskManager {
             percentComplete: newPercentComplete
         )
 
-        try await client.updateTask(taskList: list.href, uid: id, icalendar: updatedICal)
+        try await client.updateTask(resourceHref: resource.href, icalendar: updatedICal)
 
         return TaskItem(
             id: id,
@@ -184,13 +179,9 @@ public actor TaskManager {
         let taskLists = try await client.listTaskLists()
 
         for list in taskLists {
-            let icalStrings = try await client.getTasks(taskList: list.href, includeCompleted: true)
-            for ics in icalStrings {
-                let parsed = VTODOParser.parseTasks(from: ics)
-                if parsed.contains(where: { $0.uid == id }) {
-                    try await client.deleteTask(taskList: list.href, uid: id)
-                    return
-                }
+            if let resource = try await client.findTask(taskList: list.href, uid: id, includeCompleted: true) {
+                try await client.deleteTask(resourceHref: resource.href)
+                return
             }
         }
 

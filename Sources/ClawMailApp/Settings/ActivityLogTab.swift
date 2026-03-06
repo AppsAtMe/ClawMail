@@ -9,6 +9,7 @@ struct ActivityLogTab: View {
     @State private var accountFilter: String?
     @State private var searchText = ""
     @State private var autoRefresh = true
+    @State private var errorState: UIErrorState?
 
     private let refreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
@@ -85,6 +86,11 @@ struct ActivityLogTab: View {
             if autoRefresh { loadEntries() }
         }
         .onChange(of: accountFilter) { _, _ in loadEntries() }
+        .alert("Operation Failed", isPresented: showingErrorAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorState?.message ?? "Unknown error.")
+        }
     }
 
     private var filteredEntries: [AuditEntry] {
@@ -100,9 +106,14 @@ struct ActivityLogTab: View {
     private func loadEntries() {
         guard let orchestrator = appState.orchestrator else { return }
         Task {
-            if let results = try? await orchestrator.getAuditLog(account: accountFilter, limit: 500) {
+            do {
+                let results = try await orchestrator.getAuditLog(account: accountFilter, limit: 500)
                 await MainActor.run {
                     entries = results
+                }
+            } catch {
+                await MainActor.run {
+                    errorState = UIErrorState(action: "Loading activity log", error: error)
                 }
             }
         }
@@ -117,10 +128,20 @@ struct ActivityLogTab: View {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
-            if let data = try? encoder.encode(entries) {
-                try? data.write(to: url, options: .atomic)
+            do {
+                let data = try encoder.encode(entries)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                errorState = UIErrorState(action: "Exporting activity log", error: error)
             }
         }
+    }
+
+    private var showingErrorAlert: Binding<Bool> {
+        Binding(
+            get: { errorState != nil },
+            set: { if !$0 { errorState = nil } }
+        )
     }
 
     private func interfaceColor(_ interface: AgentInterface) -> Color {

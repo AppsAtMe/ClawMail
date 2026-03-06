@@ -12,19 +12,14 @@ struct GeneralTab: View {
     @State private var idleFolders: [String] = ["INBOX"]
     @State private var newIdleFolder = ""
     @State private var showingResetConfirm = false
+    @State private var errorState: UIErrorState?
 
     var body: some View {
         Form {
             Section("Startup") {
                 Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, newValue in
-                        appState.config.launchAtLogin = newValue
-                        try? appState.config.save()
-                        if newValue {
-                            LaunchAgentManager.install()
-                        } else {
-                            LaunchAgentManager.uninstall()
-                        }
+                        updateLaunchAtLogin(newValue)
                     }
             }
 
@@ -35,9 +30,13 @@ struct GeneralTab: View {
                         .frame(width: 80)
                         .onChange(of: syncInterval) { _, newValue in
                             if let val = Int(newValue), val > 0 {
-                                appState.config.syncIntervalMinutes = val
-                                try? appState.config.save()
-                                applyRuntimeSyncSettings()
+                                if !persistConfigChange(
+                                    "Saving sync interval",
+                                    update: { $0.syncIntervalMinutes = val },
+                                    onSuccess: { applyRuntimeSyncSettings() }
+                                ) {
+                                    loadFromConfig()
+                                }
                             }
                         }
                 }
@@ -48,9 +47,13 @@ struct GeneralTab: View {
                         .frame(width: 80)
                         .onChange(of: initialSyncDays) { _, newValue in
                             if let val = Int(newValue), val > 0 {
-                                appState.config.initialSyncDays = val
-                                try? appState.config.save()
-                                applyRuntimeSyncSettings()
+                                if !persistConfigChange(
+                                    "Saving initial sync period",
+                                    update: { $0.initialSyncDays = val },
+                                    onSuccess: { applyRuntimeSyncSettings() }
+                                ) {
+                                    loadFromConfig()
+                                }
                             }
                         }
                 }
@@ -65,9 +68,13 @@ struct GeneralTab: View {
                         if folder != "INBOX" {
                             Button(action: {
                                 idleFolders.removeAll { $0 == folder }
-                                appState.config.idleFolders = idleFolders
-                                try? appState.config.save()
-                                applyRuntimeSyncSettings()
+                                if !persistConfigChange(
+                                    "Removing IMAP IDLE folder",
+                                    update: { $0.idleFolders = idleFolders },
+                                    onSuccess: { applyRuntimeSyncSettings() }
+                                ) {
+                                    loadFromConfig()
+                                }
                             }) {
                                 Image(systemName: "trash")
                                     .foregroundStyle(.red)
@@ -93,8 +100,12 @@ struct GeneralTab: View {
                         .frame(width: 80)
                         .onChange(of: auditRetentionDays) { _, newValue in
                             if let val = Int(newValue), val > 0 {
-                                appState.config.auditRetentionDays = val
-                                try? appState.config.save()
+                                if !persistConfigChange(
+                                    "Saving audit retention",
+                                    update: { $0.auditRetentionDays = val }
+                                ) {
+                                    loadFromConfig()
+                                }
                             }
                         }
                 }
@@ -127,6 +138,11 @@ struct GeneralTab: View {
         } message: {
             Text("This will reset all settings to defaults. Accounts will not be removed.")
         }
+        .alert("Operation Failed", isPresented: showingErrorAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorState?.message ?? "Unknown error.")
+        }
     }
 
     private func loadFromConfig() {
@@ -142,20 +158,38 @@ struct GeneralTab: View {
         let folder = newIdleFolder.trimmingCharacters(in: .whitespaces)
         guard !folder.isEmpty, !idleFolders.contains(folder) else { return }
         idleFolders.append(folder)
-        newIdleFolder = ""
-        appState.config.idleFolders = idleFolders
-        try? appState.config.save()
-        applyRuntimeSyncSettings()
+        if !persistConfigChange(
+            "Adding IMAP IDLE folder",
+            update: { $0.idleFolders = idleFolders },
+            onSuccess: {
+                newIdleFolder = ""
+                applyRuntimeSyncSettings()
+            }
+        ) {
+            loadFromConfig()
+        }
     }
 
     private func resetSettings() {
         let accounts = appState.config.accounts
-        appState.config = AppConfig(accounts: accounts)
-        try? appState.config.save()
+        let updatedConfig = AppConfig(accounts: accounts)
+        do {
+            try updatedConfig.save()
+            appState.config = updatedConfig
+        } catch {
+            errorState = UIErrorState(action: "Resetting settings", error: error)
+            loadFromConfig()
+            return
+        }
+
         if appState.config.launchAtLogin {
-            LaunchAgentManager.install()
+            if !LaunchAgentManager.install() {
+                errorState = UIErrorState(message: "Settings were reset, but enabling launch at login failed.")
+            }
         } else {
-            LaunchAgentManager.uninstall()
+            if !LaunchAgentManager.uninstall() {
+                errorState = UIErrorState(message: "Settings were reset, but disabling launch at login failed.")
+            }
         }
         applyRuntimeSyncSettings()
         Task { await appState.orchestrator?.updateGuardrailConfig(appState.config.guardrails) }
@@ -165,11 +199,62 @@ struct GeneralTab: View {
     private func applyRuntimeSyncSettings() {
         let config = appState.config
         Task {
-            try? await appState.orchestrator?.updateSyncSettings(
-                syncIntervalMinutes: config.syncIntervalMinutes,
-                initialSyncDays: config.initialSyncDays,
-                idleFolders: config.idleFolders
-            )
+            do {
+                try await appState.orchestrator?.updateSyncSettings(
+                    syncIntervalMinutes: config.syncIntervalMinutes,
+                    initialSyncDays: config.initialSyncDays,
+                    idleFolders: config.idleFolders
+                )
+            } catch {
+                await MainActor.run {
+                    errorState = UIErrorState(
+                        action: "Updating running sync settings",
+                        error: error
+                    )
+                }
+            }
+        }
+    }
+
+    private var showingErrorAlert: Binding<Bool> {
+        Binding(
+            get: { errorState != nil },
+            set: { if !$0 { errorState = nil } }
+        )
+    }
+
+    private func updateLaunchAtLogin(_ enabled: Bool) {
+        guard persistConfigChange(
+            "Saving launch-at-login setting",
+            update: { $0.launchAtLogin = enabled }
+        ) else {
+            loadFromConfig()
+            return
+        }
+
+        let succeeded = enabled ? LaunchAgentManager.install() : LaunchAgentManager.uninstall()
+        if !succeeded {
+            errorState = UIErrorState(message: "The setting was saved, but updating the macOS LaunchAgent failed.")
+        }
+    }
+
+    @discardableResult
+    private func persistConfigChange(
+        _ action: String,
+        update: (inout AppConfig) -> Void,
+        onSuccess: (() -> Void)? = nil
+    ) -> Bool {
+        var updatedConfig = appState.config
+        update(&updatedConfig)
+
+        do {
+            try updatedConfig.save()
+            appState.config = updatedConfig
+            onSuccess?()
+            return true
+        } catch {
+            errorState = UIErrorState(action: action, error: error)
+            return false
         }
     }
 }

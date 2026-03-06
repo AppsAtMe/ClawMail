@@ -22,6 +22,7 @@ struct GuardrailsTab: View {
 
     @State private var approvedRecipients: [ApprovedRecipient] = []
     @State private var pendingApprovals: [PendingApproval] = []
+    @State private var errorState: UIErrorState?
 
     var body: some View {
         Form {
@@ -164,10 +165,23 @@ struct GuardrailsTab: View {
         .onChange(of: blocklistEnabled) { _, _ in saveConfig() }
         .onChange(of: blocklistDomains) { _, _ in saveConfig() }
         .onChange(of: firstTimeApproval) { _, _ in saveConfig() }
+        .alert("Operation Failed", isPresented: showingErrorAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorState?.message ?? "Unknown error.")
+        }
     }
 
     private func loadFromConfig() {
         let guardrails = appState.config.guardrails
+        rateLimitEnabled = false
+        maxPerMinute = ""
+        maxPerHour = ""
+        maxPerDay = ""
+        allowlistEnabled = false
+        allowlistDomains = []
+        blocklistEnabled = false
+        blocklistDomains = []
 
         if let rateLimit = guardrails.sendRateLimit {
             rateLimitEnabled = true
@@ -201,8 +215,14 @@ struct GuardrailsTab: View {
         config.guardrails.domainAllowlist = allowlistEnabled ? allowlistDomains : nil
         config.guardrails.domainBlocklist = blocklistEnabled ? blocklistDomains : nil
         config.guardrails.firstTimeRecipientApproval = firstTimeApproval
-        appState.config = config
-        try? config.save()
+        do {
+            try config.save()
+            appState.config = config
+        } catch {
+            errorState = UIErrorState(action: "Saving guardrail settings", error: error)
+            loadFromConfig()
+            return
+        }
         // Push new guardrail rules into the running engine immediately.
         let guardrails = config.guardrails
         Task { await appState.orchestrator?.updateGuardrailConfig(guardrails) }
@@ -224,31 +244,49 @@ struct GuardrailsTab: View {
 
     private func removeApprovedRecipient(_ recipient: ApprovedRecipient) {
         Task {
-            try? await appState.orchestrator?.removeApprovedRecipient(
-                email: recipient.email,
-                account: recipient.accountLabel
-            )
-            loadApprovalState()
+            do {
+                try await appState.orchestrator?.removeApprovedRecipient(
+                    email: recipient.email,
+                    account: recipient.accountLabel
+                )
+                loadApprovalState()
+            } catch {
+                await MainActor.run {
+                    errorState = UIErrorState(action: "Removing approved recipient", error: error)
+                }
+            }
         }
     }
 
     private func approvePendingApproval(_ approval: PendingApproval) {
         Task {
-            try? await appState.orchestrator?.approvePendingApproval(
-                requestId: approval.requestId,
-                account: approval.accountLabel
-            )
-            loadApprovalState()
+            do {
+                try await appState.orchestrator?.approvePendingApproval(
+                    requestId: approval.requestId,
+                    account: approval.accountLabel
+                )
+                loadApprovalState()
+            } catch {
+                await MainActor.run {
+                    errorState = UIErrorState(action: "Approving held send", error: error)
+                }
+            }
         }
     }
 
     private func rejectPendingApproval(_ approval: PendingApproval) {
         Task {
-            try? await appState.orchestrator?.rejectPendingApproval(
-                requestId: approval.requestId,
-                account: approval.accountLabel
-            )
-            loadApprovalState()
+            do {
+                try await appState.orchestrator?.rejectPendingApproval(
+                    requestId: approval.requestId,
+                    account: approval.accountLabel
+                )
+                loadApprovalState()
+            } catch {
+                await MainActor.run {
+                    errorState = UIErrorState(action: "Rejecting held send", error: error)
+                }
+            }
         }
     }
 
@@ -260,13 +298,27 @@ struct GuardrailsTab: View {
         }
 
         Task {
-            let recipients = (try? await orchestrator.listApprovedRecipients()) ?? []
-            let approvals = (try? await orchestrator.listPendingApprovals()) ?? []
+            do {
+                async let recipients = orchestrator.listApprovedRecipients()
+                async let approvals = orchestrator.listPendingApprovals()
+                let (loadedRecipients, loadedApprovals) = try await (recipients, approvals)
 
-            await MainActor.run {
-                approvedRecipients = recipients
-                pendingApprovals = approvals
+                await MainActor.run {
+                    approvedRecipients = loadedRecipients
+                    pendingApprovals = loadedApprovals
+                }
+            } catch {
+                await MainActor.run {
+                    errorState = UIErrorState(action: "Loading recipient approval state", error: error)
+                }
             }
         }
+    }
+
+    private var showingErrorAlert: Binding<Bool> {
+        Binding(
+            get: { errorState != nil },
+            set: { if !$0 { errorState = nil } }
+        )
     }
 }

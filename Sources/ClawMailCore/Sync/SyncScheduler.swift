@@ -1,5 +1,11 @@
 import Foundation
 
+struct SyncSchedulerSnapshot: Sendable, Equatable {
+    let interval: TimeInterval
+    let folders: [String]
+    let accountLabels: [String]
+}
+
 /// Runs periodic full reconciliation on a configurable interval.
 public actor SyncScheduler {
 
@@ -7,6 +13,7 @@ public actor SyncScheduler {
     private var syncEngines: [String: SyncEngine] = [:]
     private var accounts: [Account] = []
     private var interval: TimeInterval = 15 * 60 // 15 minutes
+    private var folders: [String] = ["INBOX"]
 
     public init() {}
 
@@ -14,11 +21,13 @@ public actor SyncScheduler {
     public func start(
         accounts: [Account],
         syncEngines: [String: SyncEngine],
-        interval: TimeInterval = 15 * 60
+        interval: TimeInterval = 15 * 60,
+        folders: [String] = ["INBOX"]
     ) {
         self.accounts = accounts
         self.syncEngines = syncEngines
         self.interval = interval
+        self.folders = Self.normalizedFolders(folders)
 
         syncTask?.cancel()
         syncTask = Task { [weak self] in
@@ -42,12 +51,18 @@ public actor SyncScheduler {
         try? await engine.incrementalSync(account: account, folder: folder)
     }
 
+    func snapshot() -> SyncSchedulerSnapshot {
+        SyncSchedulerSnapshot(
+            interval: interval,
+            folders: folders,
+            accountLabels: accounts.map(\.label)
+        )
+    }
+
     private func syncLoop() async {
         while !Task.isCancelled {
             for account in accounts where account.isEnabled {
                 guard let engine = syncEngines[account.label] else { continue }
-                // Sync INBOX and any other configured folders
-                let folders = ["INBOX"]
                 for folder in folders {
                     try? await engine.incrementalSync(account: account, folder: folder)
                 }
@@ -56,5 +71,16 @@ public actor SyncScheduler {
             // Sleep for the configured interval
             try? await Task.sleep(for: .seconds(interval))
         }
+    }
+
+    private static func normalizedFolders(_ folders: [String]) -> [String] {
+        let normalized = folders
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !normalized.isEmpty else { return ["INBOX"] }
+
+        var seen = Set<String>()
+        return normalized.filter { seen.insert($0).inserted }
     }
 }

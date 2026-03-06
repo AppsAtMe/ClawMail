@@ -214,6 +214,17 @@ public final class MetadataIndex: Sendable {
         }
     }
 
+    public func hasSyncState(account: String) throws -> Bool {
+        try db.read { db in
+            let count = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM sync_state WHERE account_label = ?",
+                arguments: [account]
+            )
+            return (count ?? 0) > 0
+        }
+    }
+
     // MARK: - Approved Recipients
 
     public func isRecipientApproved(email: String, account: String) throws -> Bool {

@@ -37,6 +37,7 @@ struct GeneralTab: View {
                             if let val = Int(newValue), val > 0 {
                                 appState.config.syncIntervalMinutes = val
                                 try? appState.config.save()
+                                applyRuntimeSyncSettings()
                             }
                         }
                 }
@@ -49,6 +50,7 @@ struct GeneralTab: View {
                             if let val = Int(newValue), val > 0 {
                                 appState.config.initialSyncDays = val
                                 try? appState.config.save()
+                                applyRuntimeSyncSettings()
                             }
                         }
                 }
@@ -65,6 +67,7 @@ struct GeneralTab: View {
                                 idleFolders.removeAll { $0 == folder }
                                 appState.config.idleFolders = idleFolders
                                 try? appState.config.save()
+                                applyRuntimeSyncSettings()
                             }) {
                                 Image(systemName: "trash")
                                     .foregroundStyle(.red)
@@ -142,12 +145,31 @@ struct GeneralTab: View {
         newIdleFolder = ""
         appState.config.idleFolders = idleFolders
         try? appState.config.save()
+        applyRuntimeSyncSettings()
     }
 
     private func resetSettings() {
         let accounts = appState.config.accounts
         appState.config = AppConfig(accounts: accounts)
         try? appState.config.save()
+        if appState.config.launchAtLogin {
+            LaunchAgentManager.install()
+        } else {
+            LaunchAgentManager.uninstall()
+        }
+        applyRuntimeSyncSettings()
+        Task { await appState.orchestrator?.updateGuardrailConfig(appState.config.guardrails) }
         loadFromConfig()
+    }
+
+    private func applyRuntimeSyncSettings() {
+        let config = appState.config
+        Task {
+            try? await appState.orchestrator?.updateSyncSettings(
+                syncIntervalMinutes: config.syncIntervalMinutes,
+                initialSyncDays: config.initialSyncDays,
+                idleFolders: config.idleFolders
+            )
+        }
     }
 }

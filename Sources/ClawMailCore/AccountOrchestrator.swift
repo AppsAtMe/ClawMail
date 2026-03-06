@@ -37,6 +37,7 @@ public actor AccountOrchestrator {
     private let guardrailEngine: GuardrailEngine
     private let guardrailConfigRef: GuardrailConfigRef
     private let credentialStore: CredentialStore
+    private let saveConfig: @Sendable (AppConfig) throws -> Void
     private let syncScheduler = SyncScheduler()
 
     // MARK: - Per-account state
@@ -58,12 +59,18 @@ public actor AccountOrchestrator {
 
     // MARK: - Init
 
-    public init(config: AppConfig, databaseManager: DatabaseManager) throws {
+    public init(
+        config: AppConfig,
+        databaseManager: DatabaseManager,
+        credentialStore: CredentialStore? = nil,
+        configSaver: @escaping @Sendable (AppConfig) throws -> Void = { try $0.save() }
+    ) throws {
         self.config = config
         self.databaseManager = databaseManager
         self.metadataIndex = MetadataIndex(db: databaseManager)
         self.auditLog = AuditLog(db: databaseManager)
-        self.credentialStore = CredentialStore(keychainManager: KeychainManager())
+        self.credentialStore = credentialStore ?? CredentialStore(keychainManager: KeychainManager())
+        self.saveConfig = configSaver
         // Use a reference-type box so the closure always reads the live config value.
         // Capturing a struct directly would freeze guardrail settings at startup.
         let ref = GuardrailConfigRef(config.guardrails)
@@ -79,6 +86,19 @@ public actor AccountOrchestrator {
     public func updateGuardrailConfig(_ guardrails: GuardrailConfig) {
         config.guardrails = guardrails
         guardrailConfigRef.value = guardrails
+    }
+
+    public func updateSyncSettings(
+        syncIntervalMinutes: Int,
+        initialSyncDays: Int,
+        idleFolders: [String]
+    ) async throws {
+        config.syncIntervalMinutes = max(syncIntervalMinutes, 1)
+        config.initialSyncDays = max(initialSyncDays, 1)
+        config.idleFolders = Self.normalizedIdleFolders(idleFolders)
+
+        try await restartIdleMonitoring()
+        await restartSyncScheduler()
     }
 
     /// Set all notification callbacks at once.
@@ -103,15 +123,7 @@ public actor AccountOrchestrator {
         for account in config.accounts where account.isEnabled {
             try await connectAccount(account)
         }
-
-        var engines: [String: SyncEngine] = [:]
-        for (label, conn) in connections {
-            engines[label] = conn.syncEngine
-        }
-        await syncScheduler.start(
-            accounts: config.accounts.filter(\.isEnabled),
-            syncEngines: engines
-        )
+        await restartSyncScheduler()
     }
 
     public func stop() async {
@@ -131,21 +143,28 @@ public actor AccountOrchestrator {
 
     public func addAccount(_ account: Account) async throws {
         config.accounts.append(account)
-        try config.save()
+        try saveConfig(config)
         if account.isEnabled {
             try await connectAccount(account)
         }
+        await restartSyncScheduler()
     }
 
     public func removeAccount(label: String) async throws {
+        let account = config.accounts.first { $0.label == label }
+
         if let conn = connections[label] {
             await conn.emailManager.disconnect()
             await conn.idleMonitor.stop()
             connections.removeValue(forKey: label)
         }
+        if let account {
+            try await credentialStore.deleteCredentials(accountId: account.id)
+        }
         try metadataIndex.purgeAccount(label: label)
         config.accounts.removeAll { $0.label == label }
-        try config.save()
+        try saveConfig(config)
+        await restartSyncScheduler()
     }
 
     public func listAccounts() -> [Account] {
@@ -567,6 +586,28 @@ public actor AccountOrchestrator {
         ))
     }
 
+    func performInitialSyncIfNeeded(
+        account: Account,
+        runInitialSync: @escaping @Sendable (Int) async throws -> Void
+    ) async throws {
+        guard try !metadataIndex.hasSyncState(account: account.label) else {
+            return
+        }
+        try await runInitialSync(config.initialSyncDays)
+    }
+
+    func syncSettingsSnapshot() async -> OrchestratorSyncSettingsSnapshot {
+        let scheduler = await syncScheduler.snapshot()
+        return OrchestratorSyncSettingsSnapshot(
+            syncIntervalMinutes: config.syncIntervalMinutes,
+            initialSyncDays: config.initialSyncDays,
+            idleFolders: config.idleFolders,
+            schedulerInterval: scheduler.interval,
+            schedulerFolders: scheduler.folders,
+            scheduledAccounts: scheduler.accountLabels
+        )
+    }
+
     private func connectAccount(_ account: Account) async throws {
         let credentials = try await credentialStore.credentialsFor(account: account)
 
@@ -632,25 +673,20 @@ public actor AccountOrchestrator {
             accountLabel: account.label
         )
 
+        try await performInitialSyncIfNeeded(account: account) { days in
+            try await syncEngine.initialSync(account: account, days: days)
+        }
+
         let newMailCallback = onNewMail
         let errorCallback = onError
         let sEngine = syncEngine
-        try await idleMonitor.start(
+        try await startIdleMonitor(
+            idleMonitor,
             account: account,
             credential: imapCredential,
-            folders: ["INBOX"],
-            onNewMail: { [newMailCallback, errorCallback, sEngine] accountLabel, folder in
-                Task {
-                    do {
-                        try await sEngine.handleNewMail(folder: folder)
-                    } catch {
-                        let msg = String(describing: error)
-                        fputs("ClawMail: IDLE sync error for \(accountLabel)/\(folder): \(msg)\n", stderr)
-                        errorCallback?(accountLabel, msg)
-                    }
-                }
-                newMailCallback?(accountLabel, folder)
-            }
+            syncEngine: sEngine,
+            onNewMail: newMailCallback,
+            onError: errorCallback
         )
 
         connections[account.label] = AccountConnection(
@@ -697,6 +733,88 @@ public actor AccountOrchestrator {
     private func taskManager(for account: String) throws -> TaskManager {
         try requireManager(for: account, keyPath: \.taskManager, unavailableError: .tasksNotAvailable)
     }
+
+    private func restartSyncScheduler() async {
+        var engines: [String: SyncEngine] = [:]
+        for (label, conn) in connections {
+            engines[label] = conn.syncEngine
+        }
+        let folders = Self.normalizedIdleFolders(config.idleFolders)
+
+        await syncScheduler.start(
+            accounts: config.accounts.filter(\.isEnabled),
+            syncEngines: engines,
+            interval: TimeInterval(config.syncIntervalMinutes * 60),
+            folders: folders
+        )
+    }
+
+    private func restartIdleMonitoring() async throws {
+        let accountsByLabel = Dictionary(uniqueKeysWithValues: config.accounts.map { ($0.label, $0) })
+
+        for (label, connection) in connections {
+            guard let account = accountsByLabel[label] else { continue }
+            let credentials = try await credentialStore.credentialsFor(account: account)
+            let imapCredential = credentials.imapCredential(username: account.emailAddress)
+            await connection.idleMonitor.stop()
+            try await startIdleMonitor(
+                connection.idleMonitor,
+                account: account,
+                credential: imapCredential,
+                syncEngine: connection.syncEngine,
+                onNewMail: onNewMail,
+                onError: onError
+            )
+        }
+    }
+
+    private func startIdleMonitor(
+        _ idleMonitor: IMAPIdleMonitor,
+        account: Account,
+        credential: IMAPCredential,
+        syncEngine: SyncEngine,
+        onNewMail: (@Sendable (String, String) -> Void)?,
+        onError: (@Sendable (String, String) -> Void)?
+    ) async throws {
+        let folders = Self.normalizedIdleFolders(config.idleFolders)
+        try await idleMonitor.start(
+            account: account,
+            credential: credential,
+            folders: folders,
+            onNewMail: { [syncEngine, onNewMail, onError] accountLabel, folder in
+                Task {
+                    do {
+                        try await syncEngine.handleNewMail(folder: folder)
+                    } catch {
+                        let msg = String(describing: error)
+                        fputs("ClawMail: IDLE sync error for \(accountLabel)/\(folder): \(msg)\n", stderr)
+                        onError?(accountLabel, msg)
+                    }
+                }
+                onNewMail?(accountLabel, folder)
+            }
+        )
+    }
+
+    private static func normalizedIdleFolders(_ folders: [String]) -> [String] {
+        let normalized = folders
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !normalized.isEmpty else { return ["INBOX"] }
+
+        var seen = Set<String>()
+        return normalized.filter { seen.insert($0).inserted }
+    }
+}
+
+struct OrchestratorSyncSettingsSnapshot: Sendable, Equatable {
+    let syncIntervalMinutes: Int
+    let initialSyncDays: Int
+    let idleFolders: [String]
+    let schedulerInterval: TimeInterval
+    let schedulerFolders: [String]
+    let scheduledAccounts: [String]
 }
 
 // MARK: - Credential Conversion Helpers

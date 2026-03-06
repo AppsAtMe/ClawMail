@@ -6,7 +6,33 @@ Purpose: Carry forward a full review into a fresh session with enough context to
 
 ## Session Update (March 6, 2026, latest)
 
-This handoff now reflects fixes for issues 1-8. Issues 6-8 were completed after the earlier March 6 update below and verified with a full test pass.
+This handoff now reflects fixes for issues 1-10. Issues 9-10 were completed after the earlier March 6 update below and verified with a full test pass.
+
+Completed in this session:
+- 9. Account removal now deletes stored per-account Keychain secrets before config/database cleanup. Passwords and OAuth tokens are removed alongside account metadata.
+- 10. Persisted sync settings now drive runtime behavior. The scheduler uses the configured sync interval and folder list, initial sync honors `initialSyncDays`, and General settings hot-apply sync changes to the running orchestrator instead of only saving them to disk.
+
+Current build/test status after these fixes:
+- `swift test`: passed
+- Test suite reported 154 passing tests across 21 suites
+
+New tests added in this session:
+- `Tests/ClawMailCoreTests/AccountRemovalCredentialCleanupTests.swift`
+- `Tests/ClawMailCoreTests/SyncSettingsRuntimeTests.swift`
+
+Key implementation files changed in this session:
+- `Sources/ClawMailCore/AccountOrchestrator.swift`
+- `Sources/ClawMailCore/Auth/KeychainManager.swift`
+- `Sources/ClawMailCore/Storage/MetadataIndex.swift`
+- `Sources/ClawMailCore/Sync/SyncScheduler.swift`
+- `Sources/ClawMailApp/Settings/GeneralTab.swift`
+
+Next issue to start with:
+- Recheck the lower-level observations, starting with the pending-approval workflow that still appears disconnected from actual queued approval handling.
+
+## Session Update (March 6, 2026, earlier latest)
+
+This handoff reflected fixes for issues 1-8. Issues 6-8 were completed after the earlier March 6 update below and verified with a full test pass.
 
 Completed in this session:
 - 6. OAuth-backed credentials now fetch access tokens on demand through a token-provider abstraction. Expired tokens refresh through `OAuth2Manager` before IMAP/SMTP/CalDAV/CardDAV authentication and request use.

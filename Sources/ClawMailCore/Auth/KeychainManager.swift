@@ -91,8 +91,8 @@ public actor KeychainManager {
     // MARK: - Cleanup
 
     public func deleteAll(accountId: UUID) throws {
-        try? keychain.remove(passwordKey(accountId))
-        try? keychain.remove(oauthKey(accountId))
+        try keychain.remove(passwordKey(accountId))
+        try keychain.remove(oauthKey(accountId))
     }
 
     // MARK: - Key Helpers

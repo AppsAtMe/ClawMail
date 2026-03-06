@@ -87,10 +87,7 @@ final class MCPServer: Sendable {
         // Forward IPC notifications to MCP stdout with clawmail/ prefix
         ipcClient.onNotification = { [writer] notification in
             Task {
-                let mcpNotification = JSONRPCNotification(
-                    method: "clawmail/\(notification.method)",
-                    params: notification.params
-                )
+                let mcpNotification = NotificationForwarder.forwardToMCP(notification)
                 await writer.write(mcpNotification)
             }
         }

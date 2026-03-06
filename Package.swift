@@ -9,6 +9,7 @@ let package = Package(
     ],
     products: [
         .library(name: "ClawMailCore", targets: ["ClawMailCore"]),
+        .library(name: "ClawMailAppLib", targets: ["ClawMailAppLib"]),
         .executable(name: "ClawMailApp", targets: ["ClawMailApp"]),
         .executable(name: "ClawMailCLI", targets: ["ClawMailCLI"]),
         .executable(name: "ClawMailMCP", targets: ["ClawMailMCP"]),
@@ -50,12 +51,24 @@ let package = Package(
             ]
         ),
 
+        // MARK: - ClawMailAppLib (REST API library — routes, middlewares, helpers)
+        .target(
+            name: "ClawMailAppLib",
+            dependencies: [
+                "ClawMailCore",
+                .product(name: "Hummingbird", package: "hummingbird"),
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
+
         // MARK: - ClawMailApp (macOS menu bar app)
         .executableTarget(
             name: "ClawMailApp",
             dependencies: [
                 "ClawMailCore",
-                .product(name: "Hummingbird", package: "hummingbird"),
+                "ClawMailAppLib",
             ],
             exclude: [
                 "Resources/Info.plist",
@@ -93,6 +106,16 @@ let package = Package(
         .testTarget(
             name: "ClawMailCoreTests",
             dependencies: ["ClawMailCore"],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
+        .testTarget(
+            name: "ClawMailAppLibTests",
+            dependencies: [
+                "ClawMailAppLib",
+                "ClawMailCore",
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]

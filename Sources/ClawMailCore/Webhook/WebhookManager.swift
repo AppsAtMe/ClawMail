@@ -1,5 +1,4 @@
 import Foundation
-import ClawMailCore
 
 // MARK: - WebhookManager
 
@@ -9,9 +8,10 @@ public actor WebhookManager {
 
     private let webhookURL: URL
     private let session: URLSession
-    private let maxRetries = 3
+    private let maxRetries: Int
+    private let baseDelay: UInt64 // nanoseconds
 
-    public init?(urlString: String?) {
+    public init?(urlString: String?, maxRetries: Int = 3, baseDelayNanoseconds: UInt64 = 1_000_000_000) {
         guard let urlString = urlString, let url = URL(string: urlString) else {
             return nil
         }
@@ -20,17 +20,22 @@ public actor WebhookManager {
             return nil
         }
         // Block requests to cloud metadata endpoints and loopback
-        let blockedHosts = ["169.254.169.254", "metadata.google.internal", "[::1]"]
+        let blockedHosts = ["169.254.169.254", "metadata.google.internal", "::1", "[::1]"]
         if let host = url.host?.lowercased(), blockedHosts.contains(host) {
             return nil
         }
         self.webhookURL = url
+        self.maxRetries = maxRetries
+        self.baseDelay = baseDelayNanoseconds
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 30
         self.session = URLSession(configuration: config)
     }
+
+    /// The validated URL this manager posts to.
+    public var url: URL { webhookURL }
 
     // MARK: - Notifications
 
@@ -68,15 +73,15 @@ public actor WebhookManager {
                 return // Success
             } catch {
                 lastError = error
-                // Exponential backoff: 1s, 2s, 4s
-                let delay = UInt64(pow(2.0, Double(attempt))) * 1_000_000_000
+                // Exponential backoff: 1x, 2x, 4x base delay
+                let delay = UInt64(pow(2.0, Double(attempt))) * baseDelay
                 try? await Task.sleep(nanoseconds: delay)
             }
         }
 
         // All retries exhausted — log to stderr
         if let error = lastError {
-            fputs("WebhookManager: Failed to deliver webhook to \(webhookURL) after \(maxRetries) attempts: \(error.localizedDescription)\n", stderr)
+            fputs("WebhookManager: Failed to deliver webhook to \(webhookURL) after \(maxRetries) attempts: \(String(describing: error))\n", stderr)
         }
     }
 
@@ -104,13 +109,19 @@ public actor WebhookManager {
 
 // MARK: - Types
 
-struct WebhookPayload: Codable, Sendable {
-    var event: String
-    var timestamp: String
-    var data: [String: String]
+public struct WebhookPayload: Codable, Sendable {
+    public var event: String
+    public var timestamp: String
+    public var data: [String: String]
+
+    public init(event: String, timestamp: String, data: [String: String]) {
+        self.event = event
+        self.timestamp = timestamp
+        self.data = data
+    }
 }
 
-enum WebhookError: Error, Sendable {
+public enum WebhookError: Error, Sendable {
     case invalidResponse
     case httpError(statusCode: Int)
 }

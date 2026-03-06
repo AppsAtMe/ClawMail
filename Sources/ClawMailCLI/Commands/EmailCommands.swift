@@ -132,27 +132,16 @@ struct EmailSend: AsyncParsableCommand {
     var socketPath: String?
 
     func run() async throws {
-        let toRecipients: [AnyCodableValue] = to.map { email in
-            .dictionary(["email": .string(email)])
-        }
-
-        var params: [String: AnyCodableValue] = [
-            "account": .string(account),
-            "to": .array(toRecipients),
-            "subject": .string(subject),
-            "body": .string(body),
-        ]
-
-        if !cc.isEmpty {
-            params["cc"] = .array(cc.map { .dictionary(["email": .string($0)]) })
-        }
-        if !bcc.isEmpty {
-            params["bcc"] = .array(bcc.map { .dictionary(["email": .string($0)]) })
-        }
-        if let bodyHtml { params["bodyHtml"] = .string(bodyHtml) }
-        if !attach.isEmpty {
-            params["attachments"] = .array(attach.map { .string($0) })
-        }
+        let params = CLIParamBuilders.buildSendParams(
+            account: account,
+            to: to,
+            subject: subject,
+            body: body,
+            cc: cc,
+            bcc: bcc,
+            bodyHtml: bodyHtml,
+            attachments: attach
+        )
 
         await executeRPC(socketPath: socketPath, method: "email.send", params: params, format: format)
     }

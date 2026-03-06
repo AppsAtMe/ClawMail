@@ -1,6 +1,7 @@
 import SwiftUI
 import UserNotifications
 import ClawMailCore
+import ClawMailAppLib
 
 /// Manages the ClawMail daemon lifecycle: orchestrator, IPC server, REST API server.
 @MainActor

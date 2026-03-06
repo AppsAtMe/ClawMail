@@ -1,6 +1,5 @@
 import SwiftUI
 import ClawMailCore
-import Security
 
 /// OAuth2 flow UI: shown during Google/Microsoft OAuth authorization.
 ///
@@ -93,7 +92,7 @@ struct OAuthFlowView: View {
 
     private func startOAuthFlow() {
         // Validate that OAuth client IDs are configured before starting
-        let clientId = oauthClientId(for: provider)
+        let clientId = OAuthHelpers.oauthClientId(for: provider, appConfig: appState.config)
         guard !clientId.isEmpty else {
             status = .failed
             errorMessage = "OAuth client ID not configured for \(provider.rawValue.capitalized). Go to Settings → API → OAuth to enter your client ID."
@@ -106,7 +105,7 @@ struct OAuthFlowView: View {
         Task {
             do {
                 // 1. Generate cryptographic state (CSRF prevention)
-                let state = Self.generateState()
+                let state = OAuthHelpers.generateState()
 
                 // 2. Start local callback server on random port
                 let server = OAuthCallbackServer()
@@ -115,7 +114,7 @@ struct OAuthFlowView: View {
 
                 // 3. Build authorization URL with the actual redirect URI
                 let oauthManager = OAuth2Manager(keychainManager: KeychainManager())
-                let config = Self.oauthConfig(for: provider, appConfig: appState.config, redirectURI: redirectURI)
+                let config = OAuthHelpers.oauthConfig(for: provider, appConfig: appState.config, redirectURI: redirectURI)
                 await oauthManager.setConfig(config, for: provider)
 
                 let authURL = try await oauthManager.buildAuthorizationURL(provider: provider, state: state)
@@ -127,7 +126,7 @@ struct OAuthFlowView: View {
                 let result = try await server.waitForCallback(timeout: .seconds(120))
 
                 // 6. Validate state — prevents CSRF attacks (RFC 6749 §10.12)
-                guard Self.constantTimeEqual(result.state, state) else {
+                guard OAuthHelpers.constantTimeEqual(result.state, state) else {
                     throw ClawMailError.authFailed(
                         "OAuth state mismatch — possible CSRF attack. Please try again."
                     )
@@ -178,69 +177,4 @@ struct OAuthFlowView: View {
             }
         }
     }
-
-    // MARK: - Helpers
-
-    /// Returns the configured OAuth client ID for the given provider.
-    private func oauthClientId(for provider: OAuthProvider) -> String {
-        switch provider {
-        case .google: return appState.config.oauthGoogleClientId ?? ""
-        case .microsoft: return appState.config.oauthMicrosoftClientId ?? ""
-        }
-    }
-
-    /// Build OAuthConfig with the actual redirect URI (includes the callback server's port).
-    private static func oauthConfig(for provider: OAuthProvider, appConfig: AppConfig, redirectURI: String) -> OAuthConfig {
-        switch provider {
-        case .google:
-            return OAuthConfig(
-                clientId: appConfig.oauthGoogleClientId ?? "",
-                clientSecret: appConfig.oauthGoogleClientSecret,
-                authorizationEndpoint: URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!,
-                tokenEndpoint: URL(string: "https://oauth2.googleapis.com/token")!,
-                scopes: [
-                    "https://mail.google.com/",
-                    "https://www.googleapis.com/auth/calendar",
-                    "https://www.googleapis.com/auth/contacts",
-                ],
-                redirectURI: redirectURI
-            )
-        case .microsoft:
-            return OAuthConfig(
-                clientId: appConfig.oauthMicrosoftClientId ?? "",
-                clientSecret: appConfig.oauthMicrosoftClientSecret,
-                authorizationEndpoint: URL(string: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize")!,
-                tokenEndpoint: URL(string: "https://login.microsoftonline.com/common/oauth2/v2.0/token")!,
-                scopes: [
-                    "offline_access",
-                    "IMAP.AccessAsUser.All",
-                    "SMTP.Send",
-                    "Calendars.ReadWrite",
-                    "Contacts.ReadWrite",
-                    "Tasks.ReadWrite",
-                ],
-                redirectURI: redirectURI
-            )
-        }
-    }
-
-    /// Generate a 32-byte cryptographically random state parameter, hex-encoded.
-    private static func generateState() -> String {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        return bytes.map { String(format: "%02x", $0) }.joined()
-    }
-
-    /// Constant-time string comparison to prevent timing attacks on state validation.
-    private static func constantTimeEqual(_ a: String, _ b: String) -> Bool {
-        let aBytes = Array(a.utf8)
-        let bBytes = Array(b.utf8)
-        guard aBytes.count == bBytes.count else { return false }
-        var result: UInt8 = 0
-        for (x, y) in zip(aBytes, bBytes) {
-            result |= x ^ y
-        }
-        return result == 0
-    }
 }
-

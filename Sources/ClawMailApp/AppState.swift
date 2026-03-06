@@ -1,5 +1,6 @@
 import SwiftUI
 import ClawMailCore
+import ClawMailAppLib
 
 /// Shared observable state for the ClawMail UI.
 /// Bridges between the actor-isolated AccountOrchestrator and SwiftUI views.

@@ -2,6 +2,11 @@ import Foundation
 
 /// Manages the macOS LaunchAgent for ClawMail auto-start.
 enum LaunchAgentManager {
+    typealias DirectoryCreator = (URL) throws -> Void
+    typealias PlistWriter = (String, URL) throws -> Void
+    typealias LaunchctlRunner = ([String]) throws -> Int32
+    typealias FileRemover = (URL) throws -> Void
+
     static let label = "com.clawmail.agent"
     static let plistFilename = "\(label).plist"
     static let installedAppExecutablePath = "/Applications/ClawMail.app/Contents/MacOS/ClawMailApp"
@@ -66,25 +71,30 @@ enum LaunchAgentManager {
     /// Install the LaunchAgent plist and load it.
     @discardableResult
     static func install(programPath: String = defaultProgramPath) -> Bool {
+        install(
+            programPath: programPath,
+            launchAgentsDirectory: launchAgentsDirectory,
+            plistURL: plistURL,
+            createDirectory: createLaunchAgentsDirectory,
+            writePlist: writePlist,
+            runLaunchctl: runLaunchctl
+        )
+    }
+
+    @discardableResult
+    static func install(
+        programPath: String,
+        launchAgentsDirectory: URL,
+        plistURL: URL,
+        createDirectory: DirectoryCreator,
+        writePlist: PlistWriter,
+        runLaunchctl: LaunchctlRunner
+    ) -> Bool {
         do {
-            // Ensure LaunchAgents directory exists
-            try FileManager.default.createDirectory(
-                at: launchAgentsDirectory,
-                withIntermediateDirectories: true
-            )
-
-            // Write plist
             let content = plistContent(programPath: programPath)
-            try content.write(to: plistURL, atomically: true, encoding: .utf8)
-
-            // Load with launchctl
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-            process.arguments = ["load", plistURL.path]
-            try process.run()
-            process.waitUntilExit()
-
-            return process.terminationStatus == 0
+            try createDirectory(launchAgentsDirectory)
+            try writePlist(content, plistURL)
+            return try runLaunchctl(["load", plistURL.path]) == 0
         } catch {
             return false
         }
@@ -93,21 +103,64 @@ enum LaunchAgentManager {
     /// Unload and remove the LaunchAgent plist.
     @discardableResult
     static func uninstall() -> Bool {
-        // Unload with launchctl
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = ["unload", plistURL.path]
-        try? process.run()
-        process.waitUntilExit()
+        uninstall(
+            plistURL: plistURL,
+            runLaunchctl: runLaunchctl,
+            removeItem: removeLaunchAgentPlist
+        )
+    }
 
-        // Remove plist file
-        try? FileManager.default.removeItem(at: plistURL)
+    @discardableResult
+    static func uninstall(
+        plistURL: URL,
+        runLaunchctl: LaunchctlRunner,
+        removeItem: FileRemover
+    ) -> Bool {
+        let unloadSucceeded: Bool
+        do {
+            unloadSucceeded = try runLaunchctl(["unload", plistURL.path]) == 0
+        } catch {
+            unloadSucceeded = false
+        }
 
-        return true
+        let removeSucceeded: Bool
+        do {
+            try removeItem(plistURL)
+            removeSucceeded = true
+        } catch {
+            removeSucceeded = false
+        }
+
+        return unloadSucceeded && removeSucceeded
     }
 
     /// Check if the LaunchAgent is currently installed.
     static var isInstalled: Bool {
         FileManager.default.fileExists(atPath: plistURL.path)
+    }
+
+    private static func createLaunchAgentsDirectory(at directory: URL) throws {
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+    }
+
+    private static func writePlist(_ content: String, to url: URL) throws {
+        try content.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private static func runLaunchctl(arguments: [String]) throws -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = arguments
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+
+    private static func removeLaunchAgentPlist(at url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.removeItem(at: url)
     }
 }

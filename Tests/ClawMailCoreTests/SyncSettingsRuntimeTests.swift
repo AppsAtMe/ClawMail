@@ -83,6 +83,78 @@ struct SyncSettingsRuntimeTests {
 
         #expect(await recorder.snapshot() == [12])
     }
+
+    @Test func triggerSyncReportsErrorsViaCallback() async throws {
+        let recorder = SchedulerErrorRecorder()
+        let scheduler = SyncScheduler(
+            syncOperation: { _, _, _ in
+                throw ClawMailError.serverError("manual sync failed")
+            },
+            sleepOperation: { _ in
+                throw CancellationError()
+            }
+        )
+        await scheduler.setErrorHandler { account, message in
+            Task {
+                await recorder.record(account: account, message: message)
+            }
+        }
+
+        var account = testAccount(label: "work")
+        account.isEnabled = false
+
+        await scheduler.start(
+            accounts: [account],
+            syncEngines: ["work": try makeSyncEngine(accountLabel: "work")],
+            interval: 60,
+            folders: ["INBOX"]
+        )
+
+        await scheduler.triggerSync(accountLabel: "work", folder: "INBOX")
+        try await Task.sleep(for: .milliseconds(50))
+        await scheduler.stop()
+
+        #expect(await recorder.records() == [
+            SchedulerErrorRecord(
+                account: "work",
+                message: "Scheduled sync error for INBOX: Server error: manual sync failed"
+            )
+        ])
+    }
+
+    @Test func scheduledSyncLoopReportsErrorsViaCallback() async throws {
+        let recorder = SchedulerErrorRecorder()
+        let scheduler = SyncScheduler(
+            syncOperation: { _, _, _ in
+                throw ClawMailError.serverError("background sync failed")
+            },
+            sleepOperation: { _ in
+                throw CancellationError()
+            }
+        )
+        await scheduler.setErrorHandler { account, message in
+            Task {
+                await recorder.record(account: account, message: message)
+            }
+        }
+
+        await scheduler.start(
+            accounts: [testAccount(label: "work")],
+            syncEngines: ["work": try makeSyncEngine(accountLabel: "work")],
+            interval: 60,
+            folders: ["INBOX"]
+        )
+
+        try await Task.sleep(for: .milliseconds(50))
+        await scheduler.stop()
+
+        #expect(await recorder.records() == [
+            SchedulerErrorRecord(
+                account: "work",
+                message: "Scheduled sync error for INBOX: Server error: background sync failed"
+            )
+        ])
+    }
 }
 
 private actor InitialSyncRecorder {
@@ -95,4 +167,44 @@ private actor InitialSyncRecorder {
     func snapshot() -> [Int] {
         values
     }
+}
+
+private struct SchedulerErrorRecord: Equatable {
+    let account: String
+    let message: String
+}
+
+private actor SchedulerErrorRecorder {
+    private var stored: [SchedulerErrorRecord] = []
+
+    func record(account: String, message: String) {
+        stored.append(SchedulerErrorRecord(account: account, message: message))
+    }
+
+    func records() -> [SchedulerErrorRecord] {
+        stored
+    }
+}
+
+private func makeSyncEngine(accountLabel: String) throws -> SyncEngine {
+    let imapClient = IMAPClient(
+        host: "imap.example.com",
+        port: 993,
+        security: .ssl,
+        credential: .password(username: "user@example.com", password: "secret")
+    )
+    let metadataIndex = MetadataIndex(db: try DatabaseManager(inMemory: true))
+    return SyncEngine(imapClient: imapClient, metadataIndex: metadataIndex, accountLabel: accountLabel)
+}
+
+private func testAccount(label: String) -> Account {
+    Account(
+        label: label,
+        emailAddress: "\(label)@example.com",
+        displayName: "Test \(label)",
+        imapHost: "imap.example.com",
+        imapPort: 993,
+        smtpHost: "smtp.example.com",
+        smtpPort: 465
+    )
 }

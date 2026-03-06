@@ -6,6 +6,32 @@ Purpose: Carry forward a full review into a fresh session with enough context to
 
 ## Session Update (March 6, 2026, newest latest)
 
+This handoff now reflects follow-up cleanup on the remaining low-risk `try?` / silent-failure paths that were still worth tightening after the original review findings were closed.
+
+Completed in this session:
+- Scheduled and manual `SyncScheduler` runs no longer swallow sync failures silently. Errors are formatted, logged, and forwarded through the orchestrator `onError` callback.
+- `SyncScheduler.stop()` now awaits task shutdown so test runs and app shutdown do not leave the background scheduler task lingering after cancellation.
+- `LaunchAgentManager.uninstall()` no longer always reports success. Install/uninstall now share small injected helper seams so failure handling can be tested without invoking the real `launchctl` binary.
+
+Current build/test status after these fixes:
+- `swift test`: passed
+- Test suite reported 167 passing tests across 23 suites
+
+New tests added in this session:
+- `Tests/ClawMailAppTests/LaunchAgentManagerTests.swift`
+- `Tests/ClawMailCoreTests/SyncSettingsRuntimeTests.swift`
+
+Key implementation files changed in this session:
+- `Sources/ClawMailCore/Sync/SyncScheduler.swift`
+- `Sources/ClawMailCore/AccountOrchestrator.swift`
+- `Sources/ClawMailApp/LaunchAgent/LaunchAgentManager.swift`
+
+Next issue to start with:
+- UI-level coverage for the settings error alerts is still the most obvious follow-up if we want better verification around the March 6 settings hardening.
+- Remaining `try?` uses are now mostly best-effort cleanup, decoding probes, or notification side effects; if continuing the sweep, the next candidates are `AppDelegate` notification setup and the IPC cleanup paths.
+
+## Session Update (March 6, 2026, newest latest)
+
 This handoff now reflects follow-up fixes for the remaining lower-level review observations that were still open after the pending-approval workflow work.
 
 Completed in this session:

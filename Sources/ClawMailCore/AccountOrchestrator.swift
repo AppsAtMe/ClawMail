@@ -138,10 +138,11 @@ public actor AccountOrchestrator {
         onNewMail: @escaping @Sendable (String, String) -> Void,
         onConnectionStatusChanged: @escaping @Sendable (String, ConnectionStatus) -> Void,
         onError: @escaping @Sendable (String, String) -> Void
-    ) {
+    ) async {
         self.onNewMail = onNewMail
         self.onConnectionStatusChanged = onConnectionStatusChanged
         self.onError = onError
+        await syncScheduler.setErrorHandler(onError)
     }
 
     /// Set callback for pending recipient approval notifications.

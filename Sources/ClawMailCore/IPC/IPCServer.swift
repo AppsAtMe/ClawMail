@@ -18,6 +18,15 @@ private final class TokenBox: @unchecked Sendable {
 public enum IPCSessionType: String, Sendable {
     case cli
     case agent
+
+    var auditInterface: AgentInterface {
+        switch self {
+        case .cli:
+            return .cli
+        case .agent:
+            return .mcp
+        }
+    }
 }
 
 /// Thread-safe tracker for connected IPC clients.
@@ -346,9 +355,10 @@ final class IPCServerHandler: ChannelInboundHandler, @unchecked Sendable {
         // sending non-Sendable ChannelHandlerContext across isolation boundaries.
         let channel = context.channel
         let dispatcherRef = dispatcher
+        let interface = sessionType.auditInterface
 
         Task {
-            let response = await dispatcherRef.dispatch(requestData)
+            let response = await dispatcherRef.dispatch(requestData, interface: interface)
             guard let responseData = try? encodeJSONRPC(response) else { return }
             var outBuffer = channel.allocator.buffer(capacity: responseData.count)
             outBuffer.writeBytes(responseData)

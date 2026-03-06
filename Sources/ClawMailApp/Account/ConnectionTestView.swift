@@ -30,7 +30,7 @@ struct ConnectionTestView: View {
     @Binding var results: [ConnectionTestResult]
     @Binding var inProgress: Bool
     let account: Account
-    let password: String
+    let authMaterial: ConnectionTestAuthMaterial
 
     private let timeoutSeconds = 15
 
@@ -81,28 +81,24 @@ struct ConnectionTestView: View {
         Task {
             // Test IMAP
             await addResult(service: "IMAP", test: {
-                let credential: IMAPCredential = .password(
-                    username: account.emailAddress,
-                    password: password
-                )
                 let client = IMAPClient(
                     host: account.imapHost,
                     port: account.imapPort,
                     security: account.imapSecurity,
-                    credential: credential
+                    credential: authMaterial.imapCredential(email: account.emailAddress)
                 )
                 try await client.connect()
+                try await client.authenticate()
                 await client.disconnect()
             })
 
             // Test SMTP
             await addResult(service: "SMTP", test: {
-                let creds: Credentials = .password(password)
                 let client = SMTPClient(
                     host: account.smtpHost,
                     port: account.smtpPort,
                     security: account.smtpSecurity,
-                    credentials: creds,
+                    credentials: authMaterial.smtpCredentials(),
                     senderEmail: account.emailAddress
                 )
                 try await client.connect()
@@ -112,11 +108,10 @@ struct ConnectionTestView: View {
             // Test CalDAV (optional)
             if let caldavURL = account.caldavURL {
                 await addResult(service: "CalDAV", test: {
-                    let cred: CalDAVCredential = .password(
-                        username: account.emailAddress,
-                        password: password
+                    let client = try CalDAVClient(
+                        baseURL: caldavURL,
+                        credential: authMaterial.calDAVCredential(email: account.emailAddress)
                     )
-                    let client = try CalDAVClient(baseURL: caldavURL, credential: cred)
                     try await client.authenticate()
                 })
             }
@@ -124,11 +119,10 @@ struct ConnectionTestView: View {
             // Test CardDAV (optional)
             if let carddavURL = account.carddavURL {
                 await addResult(service: "CardDAV", test: {
-                    let cred: CardDAVCredential = .password(
-                        username: account.emailAddress,
-                        password: password
+                    let client = try CardDAVClient(
+                        baseURL: carddavURL,
+                        credential: authMaterial.cardDAVCredential(email: account.emailAddress)
                     )
-                    let client = try CardDAVClient(baseURL: carddavURL, credential: cred)
                     try await client.authenticate()
                 })
             }

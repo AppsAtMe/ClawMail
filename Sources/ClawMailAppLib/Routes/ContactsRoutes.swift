@@ -51,7 +51,7 @@ enum ContactsRoutes {
         group.post { request, context -> Response in
             do {
                 let body = try await decodeBody(CreateContactRequest.self, from: request, context: context)
-                let contact = try await orchestrator.createContact(account: body.account, body)
+                let contact = try await orchestrator.createContact(account: body.account, body, interface: .rest)
                 return jsonResponse(contact, status: .created)
             } catch let error as ClawMailError {
                 return clawMailErrorResponse(error)
@@ -70,7 +70,8 @@ enum ContactsRoutes {
                 let contact = try await orchestrator.updateContact(
                     account: body.account,
                     id: contactId,
-                    body
+                    body,
+                    interface: .rest
                 )
                 return jsonResponse(contact)
             } catch let error as ClawMailError {
@@ -87,7 +88,7 @@ enum ContactsRoutes {
                 guard let contactId = context.parameters.get("contactId") else {
                     return badRequestResponse("Missing contactId")
                 }
-                try await orchestrator.deleteContact(account: account, id: contactId)
+                try await orchestrator.deleteContact(account: account, id: contactId, interface: .rest)
                 return jsonResponse(["ok": true])
             } catch let error as ClawMailError {
                 return clawMailErrorResponse(error)

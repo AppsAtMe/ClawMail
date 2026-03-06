@@ -19,7 +19,7 @@ public struct CardDAVAddressBook: Codable, Sendable, Equatable {
 /// Credential used for CardDAV authentication.
 public enum CardDAVCredential: Sendable {
     case password(username: String, password: String)
-    case oauthToken(String)
+    case oauthToken(OAuthTokenProvider)
 }
 
 // MARK: - CardDAVClient
@@ -63,7 +63,7 @@ public actor CardDAVClient {
             request.httpMethod = "PROPFIND"
             request.setValue("0", forHTTPHeaderField: "Depth")
             request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
-            applyAuth(to: &request)
+            try await applyAuth(to: &request)
 
             do {
                 let (_, response) = try await session.data(for: request)
@@ -88,7 +88,7 @@ public actor CardDAVClient {
         request.httpMethod = "PROPFIND"
         request.setValue("0", forHTTPHeaderField: "Depth")
         request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        applyAuth(to: &request)
+        try await applyAuth(to: &request)
 
         let body = CardDAVXMLBuilder.propfind(properties: ["d:current-user-principal"])
         request.httpBody = body.data(using: .utf8)
@@ -123,7 +123,7 @@ public actor CardDAVClient {
         request.httpMethod = "PROPFIND"
         request.setValue("1", forHTTPHeaderField: "Depth")
         request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        applyAuth(to: &request)
+        try await applyAuth(to: &request)
 
         let body = CardDAVXMLBuilder.propfind(properties: [
             "d:displayname",
@@ -159,7 +159,7 @@ public actor CardDAVClient {
         request.httpMethod = "REPORT"
         request.setValue("1", forHTTPHeaderField: "Depth")
         request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        applyAuth(to: &request)
+        try await applyAuth(to: &request)
 
         let body: String
         if let query = query, !query.isEmpty {
@@ -186,7 +186,7 @@ public actor CardDAVClient {
         request.httpMethod = "PUT"
         request.setValue("text/vcard; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.setValue("*", forHTTPHeaderField: "If-None-Match")
-        applyAuth(to: &request)
+        try await applyAuth(to: &request)
         request.httpBody = vcard.data(using: .utf8)
 
         let (_, response) = try await session.data(for: request)
@@ -203,7 +203,7 @@ public actor CardDAVClient {
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "PUT"
         request.setValue("text/vcard; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        applyAuth(to: &request)
+        try await applyAuth(to: &request)
         request.httpBody = vcard.data(using: .utf8)
 
         let (_, response) = try await session.data(for: request)
@@ -217,7 +217,7 @@ public actor CardDAVClient {
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "DELETE"
-        applyAuth(to: &request)
+        try await applyAuth(to: &request)
 
         let (_, response) = try await session.data(for: request)
         try validateResponse(response, context: "deleteContact", allowedCodes: [200, 204])
@@ -225,7 +225,7 @@ public actor CardDAVClient {
 
     // MARK: - Private Helpers
 
-    private func applyAuth(to request: inout URLRequest) {
+    private func applyAuth(to request: inout URLRequest) async throws {
         switch credential {
         case .password(let username, let password):
             let credentials = "\(username):\(password)"
@@ -233,7 +233,8 @@ public actor CardDAVClient {
                 let base64 = data.base64EncodedString()
                 request.setValue("Basic \(base64)", forHTTPHeaderField: "Authorization")
             }
-        case .oauthToken(let token):
+        case .oauthToken(let tokenProvider):
+            let token = try await tokenProvider.accessToken()
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
     }
@@ -261,7 +262,7 @@ public actor CardDAVClient {
         request.httpMethod = "PROPFIND"
         request.setValue("0", forHTTPHeaderField: "Depth")
         request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        applyAuth(to: &request)
+        try await applyAuth(to: &request)
 
         let body = CardDAVXMLBuilder.propfind(properties: ["card:addressbook-home-set"])
         request.httpBody = body.data(using: .utf8)

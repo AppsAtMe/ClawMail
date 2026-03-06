@@ -106,7 +106,7 @@ struct AccountSetupView: View {
                 results: $testResults,
                 inProgress: $testInProgress,
                 account: buildAccount(),
-                password: password
+                authMaterial: connectionTestAuthMaterial
             )
             .environment(appState)
         case .label:
@@ -155,7 +155,10 @@ struct AccountSetupView: View {
         case .provider: return true
         case .credentials:
             if provider != .other {
-                return !oauthInProgress && oauthTokens != nil && davURLValidationError == nil
+                return !emailAddress.isEmpty
+                    && !oauthInProgress
+                    && oauthTokens != nil
+                    && davURLValidationError == nil
             }
             return !emailAddress.isEmpty
                 && !password.isEmpty
@@ -170,6 +173,13 @@ struct AccountSetupView: View {
 
     private var testsPassed: Bool {
         !testResults.isEmpty && testResults.allSatisfy(\.passed)
+    }
+
+    private var connectionTestAuthMaterial: ConnectionTestAuthMaterial {
+        if let oauthTokens {
+            return .oauth2(oauthTokens)
+        }
+        return .password(password)
     }
 
     private func advanceStep() {
@@ -339,29 +349,27 @@ private struct CredentialsFormView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                emailSection
+
                 if provider != .other {
+                    Divider()
                     OAuthFlowView(
                         provider: provider == .google ? .google : .microsoft,
                         inProgress: $oauthInProgress,
                         onTokensObtained: onTokensObtained
                     )
                     .environment(appState)
+                    Divider()
+                    optionalSection
                 } else {
-                    manualForm
+                    Divider()
+                    imapSection
+                    smtpSection
+                    Divider()
+                    optionalSection
                 }
             }
             .padding()
-        }
-    }
-
-    private var manualForm: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            emailSection
-            Divider()
-            imapSection
-            smtpSection
-            Divider()
-            optionalSection
         }
     }
 
@@ -372,8 +380,10 @@ private struct CredentialsFormView: View {
                 .textFieldStyle(.roundedBorder)
             TextField("Display Name", text: $displayName)
                 .textFieldStyle(.roundedBorder)
-            SecureField("Password", text: $password)
-                .textFieldStyle(.roundedBorder)
+            if provider == .other {
+                SecureField("Password", text: $password)
+                    .textFieldStyle(.roundedBorder)
+            }
         }
     }
 

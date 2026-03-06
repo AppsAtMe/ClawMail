@@ -243,7 +243,8 @@ public actor SMTPClient {
                 throw ClawMailError.authFailed("SMTP AUTH LOGIN failed: \(passResp.message)")
             }
 
-        case .oauth2(let accessToken, _, _):
+        case .oauth2(let tokenProvider):
+            let accessToken = try await tokenProvider.accessToken()
             let authString = "user=\(user)\u{01}auth=Bearer \(accessToken)\u{01}\u{01}"
             let encoded = Data(authString.utf8).base64EncodedString()
             try await sendCommand("AUTH XOAUTH2 \(encoded)")

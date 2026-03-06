@@ -34,10 +34,12 @@ public actor OAuth2Manager {
     private static let formSafeChars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
 
     private let keychainManager: KeychainManager
+    private let session: URLSession
     private var configs: [OAuthProvider: OAuthConfig] = [:]
 
-    public init(keychainManager: KeychainManager) {
+    public init(keychainManager: KeychainManager, session: URLSession = .shared) {
         self.keychainManager = keychainManager
+        self.session = session
     }
 
     public func setConfig(_ config: OAuthConfig, for provider: OAuthProvider) {
@@ -167,7 +169,7 @@ public actor OAuth2Manager {
         }.joined(separator: "&")
         request.httpBody = bodyString.data(using: .utf8)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ClawMailError.connectionError("Invalid token response")

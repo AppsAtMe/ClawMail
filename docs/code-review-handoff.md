@@ -4,6 +4,48 @@ Date: March 6, 2026
 Repository: `/Users/andrewrmitchell/Developer/ClawMail`
 Purpose: Carry forward a full review into a fresh session with enough context to fix issues without re-reading the entire repo.
 
+## Session Update (March 6, 2026, latest)
+
+This handoff now reflects fixes for issues 1-8. Issues 6-8 were completed after the earlier March 6 update below and verified with a full test pass.
+
+Completed in this session:
+- 6. OAuth-backed credentials now fetch access tokens on demand through a token-provider abstraction. Expired tokens refresh through `OAuth2Manager` before IMAP/SMTP/CalDAV/CardDAV authentication and request use.
+- 7. Account setup connection testing now exercises the configured auth path. IMAP performs full auth, and OAuth-based setup uses OAuth tokens instead of the password field for SMTP/CalDAV/CardDAV tests.
+- 8. Audit provenance is now passed per request instead of inferred from the global agent lock. IPC sessions map to `.cli` or `.mcp`, REST write routes pass `.rest`, and active MCP sessions no longer mislabel unrelated CLI/REST writes.
+
+Current build/test status after these fixes:
+- `swift test`: passed
+- Test suite reported 149 passing tests across 19 suites
+
+New tests added in this session:
+- `Tests/ClawMailCoreTests/OAuthRefreshTests.swift`
+- `Tests/ClawMailAppTests/ConnectionTestAuthMaterialTests.swift`
+- `Tests/ClawMailCoreTests/AuditProvenanceTests.swift`
+
+Key implementation files changed in this session:
+- `Sources/ClawMailCore/Auth/OAuthTokenProvider.swift`
+- `Sources/ClawMailCore/Auth/CredentialStore.swift`
+- `Sources/ClawMailCore/Auth/OAuth2Manager.swift`
+- `Sources/ClawMailCore/Auth/KeychainManager.swift`
+- `Sources/ClawMailCore/Email/IMAPClient.swift`
+- `Sources/ClawMailCore/Email/SMTPClient.swift`
+- `Sources/ClawMailCore/Calendar/CalDAVClient.swift`
+- `Sources/ClawMailCore/Contacts/CardDAVClient.swift`
+- `Sources/ClawMailCore/AccountOrchestrator.swift`
+- `Sources/ClawMailCore/IPC/IPCServer.swift`
+- `Sources/ClawMailCore/IPC/IPCDispatcher.swift`
+- `Sources/ClawMailApp/Account/ConnectionTestAuthMaterial.swift`
+- `Sources/ClawMailApp/Account/ConnectionTestView.swift`
+- `Sources/ClawMailApp/Account/AccountSetupView.swift`
+- `Sources/ClawMailAppLib/Routes/EmailRoutes.swift`
+- `Sources/ClawMailAppLib/Routes/CalendarRoutes.swift`
+- `Sources/ClawMailAppLib/Routes/ContactsRoutes.swift`
+- `Sources/ClawMailAppLib/Routes/TasksRoutes.swift`
+- `Package.swift`
+
+Next issue to start with:
+- 9. Removing an account does not remove stored secrets
+
 ## Session Update (March 6, 2026, later)
 
 This handoff started with issues 1-10 open. Issues 1-5 are now fixed in code and covered by regression tests.
@@ -201,6 +243,8 @@ Suggested fix direction:
 
 ### 6. OAuth refresh path exists but is effectively unused
 
+Status: Fixed on March 6, 2026, after the earlier handoff update.
+
 Severity: Medium-high
 
 Problem:
@@ -224,6 +268,8 @@ Suggested fix direction:
 
 ### 7. Connection test UI is not actually validating the configured auth path
 
+Status: Fixed on March 6, 2026, after the earlier handoff update.
+
 Severity: Medium
 
 Problem:
@@ -245,6 +291,8 @@ Suggested fix direction:
 - Keep the setup wizard’s auth path aligned with the runtime auth path.
 
 ### 8. Audit interface attribution is globally shared and inaccurate
+
+Status: Fixed on March 6, 2026, after the earlier handoff update.
 
 Severity: Medium
 
@@ -336,38 +384,26 @@ Observed outcomes:
 
 ## Recommended Fix Order For New Session
 
-1. Wire OAuth token refresh into actual client use.
-2. Fix connection testing logic.
-3. Correct audit provenance plumbing.
-4. Clean up account-removal credential deletion.
-5. Make persisted sync/IDLE settings actually drive runtime behavior.
-6. Add regression tests for the remaining items above.
+1. Clean up account-removal credential deletion.
+2. Make persisted sync/IDLE settings actually drive runtime behavior.
+3. Recheck the pending-approval workflow and other lower-level observations once 9-10 are done.
+4. Add regression tests for the remaining items above.
 
 ## Suggested Regression Tests To Add
 
-- Symlink escape tests for attachment upload and attachment download.
-- DAV URL validation tests rejecting `http://`.
-- DAV malicious absolute `href` / home-set cross-origin credential leak tests.
-- Per-account recipient approval isolation tests.
-- Launch-agent command validity check or packaging smoke test.
-- OAuth expiry/refresh flow tests.
-- Setup connection test coverage for IMAP auth and OAuth-backed service tests.
-- Audit logging provenance tests proving CLI/REST/MCP attribution stays correct under concurrency.
 - Account removal test proving Keychain items are deleted.
 - Runtime config propagation tests for sync interval and IDLE folders.
+- Pending-approval workflow tests if that table is wired into real approval queueing.
 
 ## Notes For The Next Session
 
 - The repo is large enough that re-reviewing everything will waste context. Start from this handoff and confirm the remaining issues directly in the referenced files.
-- Do not re-open issues 1-5 unless you find a regression. They were fixed and verified with a full `swift test` pass in this session.
+- Do not re-open issues 1-8 unless you find a regression. They were fixed and verified with a full `swift test` pass across 149 tests in 19 suites.
 - The highest-risk bugs are concentrated in:
-  - `Sources/ClawMailCore/Email/EmailManager.swift`
-  - `Sources/ClawMailCore/Calendar/CalDAVClient.swift`
-  - `Sources/ClawMailCore/Contacts/CardDAVClient.swift`
-  - `Sources/ClawMailCore/Storage/DatabaseManager.swift`
-  - `Sources/ClawMailCore/Storage/MetadataIndex.swift`
-  - `Sources/ClawMailApp/LaunchAgent/LaunchAgentManager.swift`
-  - `Resources/com.clawmail.agent.plist`
-  - `Sources/ClawMailCore/Auth/OAuth2Manager.swift`
-  - `Sources/ClawMailApp/Account/ConnectionTestView.swift`
   - `Sources/ClawMailCore/AccountOrchestrator.swift`
+  - `Sources/ClawMailCore/Auth/CredentialStore.swift`
+  - `Sources/ClawMailCore/Auth/KeychainManager.swift`
+  - `Sources/ClawMailCore/Models/Config.swift`
+  - `Sources/ClawMailCore/Sync/SyncScheduler.swift`
+  - `Sources/ClawMailCore/Email/IMAPIdleMonitor.swift`
+  - `Sources/ClawMailApp/Settings/GeneralTab.swift`

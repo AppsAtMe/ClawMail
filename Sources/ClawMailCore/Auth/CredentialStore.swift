@@ -4,16 +4,26 @@ import Foundation
 
 public enum Credentials: Sendable {
     case password(String)
-    case oauth2(accessToken: String, refreshToken: String, expiresAt: Date)
+    case oauth2(tokenProvider: OAuthTokenProvider)
 }
 
 // MARK: - CredentialStore
 
 public actor CredentialStore {
-    private let keychainManager: KeychainManager
+    private static let refreshRedirectURI = "http://127.0.0.1/clawmail/oauth-refresh"
 
-    public init(keychainManager: KeychainManager) {
+    private let keychainManager: KeychainManager
+    private let configLoader: @Sendable () throws -> AppConfig
+    private let oauthSession: URLSession
+
+    public init(
+        keychainManager: KeychainManager,
+        configLoader: @escaping @Sendable () throws -> AppConfig = { try AppConfig.load() },
+        oauthSession: URLSession = .shared
+    ) {
         self.keychainManager = keychainManager
+        self.configLoader = configLoader
+        self.oauthSession = oauthSession
     }
 
     public func credentialsFor(account: Account) async throws -> Credentials {
@@ -24,15 +34,14 @@ public actor CredentialStore {
             }
             return .password(password)
 
-        case .oauth2:
-            guard let tokens = await keychainManager.getOAuthTokens(accountId: account.id) else {
+        case .oauth2(let provider):
+            guard await keychainManager.getOAuthTokens(accountId: account.id) != nil else {
                 throw ClawMailError.authFailed("No OAuth2 tokens stored for account '\(account.label)'")
             }
-            return .oauth2(
-                accessToken: tokens.accessToken,
-                refreshToken: tokens.refreshToken,
-                expiresAt: tokens.expiresAt
-            )
+            let accountId = account.id
+            return .oauth2(tokenProvider: OAuthTokenProvider {
+                try await self.currentAccessToken(accountId: accountId, provider: provider)
+            })
         }
     }
 
@@ -59,5 +68,24 @@ public actor CredentialStore {
 
     public func generateAPIKey() async throws -> String {
         try await keychainManager.generateAPIKey()
+    }
+
+    private func currentAccessToken(accountId: UUID, provider: OAuthProvider) async throws -> String {
+        let appConfig = try configLoader()
+        let clientId = OAuthHelpers.oauthClientId(for: provider, appConfig: appConfig)
+        guard !clientId.isEmpty else {
+            throw ClawMailError.authFailed("OAuth client ID not configured for \(provider.rawValue)")
+        }
+
+        let clientSecret = await keychainManager.getOAuthClientSecret(for: provider)
+        let oauthManager = OAuth2Manager(keychainManager: keychainManager, session: oauthSession)
+        let oauthConfig = OAuthHelpers.oauthConfig(
+            for: provider,
+            appConfig: appConfig,
+            clientSecret: clientSecret,
+            redirectURI: Self.refreshRedirectURI
+        )
+        await oauthManager.setConfig(oauthConfig, for: provider)
+        return try await oauthManager.getAccessToken(accountId: accountId, provider: provider)
     }
 }

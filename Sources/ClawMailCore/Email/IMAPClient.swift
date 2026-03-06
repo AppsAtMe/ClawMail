@@ -224,7 +224,7 @@ private enum IMAPDateFormatter {
 /// Credential type for IMAP authentication.
 public enum IMAPCredential: Sendable {
     case password(username: String, password: String)
-    case oauth2(username: String, accessToken: String)
+    case oauth2(username: String, tokenProvider: OAuthTokenProvider)
 }
 
 // MARK: - IMAPResponseHandler (NIO ChannelHandler)
@@ -472,7 +472,8 @@ public actor IMAPClient {
         switch credential {
         case .password(let username, let password):
             try await loginAuthenticate(username: username, password: password)
-        case .oauth2(let username, let accessToken):
+        case .oauth2(let username, let tokenProvider):
+            let accessToken = try await tokenProvider.accessToken()
             try await xoauth2Authenticate(username: username, accessToken: accessToken)
         }
     }

@@ -42,7 +42,7 @@ public actor AccountOrchestrator {
     // MARK: - Per-account state
 
     private var connections: [String: AccountConnection] = [:]
-    private var agentInterface: AgentInterface?
+    private var agentSessionActive = false
 
     /// Callback for new mail notifications (account label, folder).
     public var onNewMail: (@Sendable (String, String) -> Void)?
@@ -159,17 +159,17 @@ public actor AccountOrchestrator {
     // MARK: - Agent Lock
 
     public func acquireAgentLock(interface: AgentInterface) -> Bool {
-        if agentInterface != nil { return false }
-        agentInterface = interface
+        if agentSessionActive { return false }
+        agentSessionActive = true
         return true
     }
 
     public func releaseAgentLock() {
-        agentInterface = nil
+        agentSessionActive = false
     }
 
     public var isAgentConnected: Bool {
-        agentInterface != nil
+        agentSessionActive
     }
 
     // MARK: - Email Operations
@@ -190,7 +190,7 @@ public actor AccountOrchestrator {
         return try await mgr.readMessage(id: id)
     }
 
-    public func sendMessage(_ request: SendEmailRequest) async throws -> String {
+    public func sendMessage(_ request: SendEmailRequest, interface: AgentInterface = .cli) async throws -> String {
         let mgr = try emailManager(for: request.account)
 
         try await enforceGuardrails(
@@ -201,6 +201,7 @@ public actor AccountOrchestrator {
         let messageId = try await mgr.sendMessage(request)
 
         try auditSuccess(
+            interface: interface,
             operation: "email.send",
             account: request.account,
             parameters: [
@@ -213,7 +214,7 @@ public actor AccountOrchestrator {
         return messageId
     }
 
-    public func replyToMessage(_ request: ReplyEmailRequest) async throws -> String {
+    public func replyToMessage(_ request: ReplyEmailRequest, interface: AgentInterface = .cli) async throws -> String {
         let mgr = try emailManager(for: request.account)
 
         // Read original to get recipients for guardrail check
@@ -227,6 +228,7 @@ public actor AccountOrchestrator {
         let messageId = try await mgr.replyToMessage(request)
 
         try auditSuccess(
+            interface: interface,
             operation: "email.reply",
             account: request.account,
             parameters: [
@@ -239,7 +241,7 @@ public actor AccountOrchestrator {
         return messageId
     }
 
-    public func forwardMessage(_ request: ForwardEmailRequest) async throws -> String {
+    public func forwardMessage(_ request: ForwardEmailRequest, interface: AgentInterface = .cli) async throws -> String {
         let mgr = try emailManager(for: request.account)
 
         try await enforceGuardrails(account: request.account, recipients: request.to)
@@ -252,6 +254,7 @@ public actor AccountOrchestrator {
         )
 
         try auditSuccess(
+            interface: interface,
             operation: "email.forward",
             account: request.account,
             parameters: [
@@ -264,22 +267,24 @@ public actor AccountOrchestrator {
         return messageId
     }
 
-    public func moveMessage(account: String, id: String, to folder: String) async throws {
+    public func moveMessage(account: String, id: String, to folder: String, interface: AgentInterface = .cli) async throws {
         let mgr = try emailManager(for: account)
         try await mgr.moveMessage(id: id, to: folder)
 
         try auditSuccess(
+            interface: interface,
             operation: "email.move",
             account: account,
             parameters: ["messageId": .string(id), "destination": .string(folder)]
         )
     }
 
-    public func deleteMessage(account: String, id: String, permanent: Bool = false) async throws {
+    public func deleteMessage(account: String, id: String, permanent: Bool = false, interface: AgentInterface = .cli) async throws {
         let mgr = try emailManager(for: account)
         try await mgr.deleteMessage(id: id, permanent: permanent)
 
         try auditSuccess(
+            interface: interface,
             operation: "email.delete",
             account: account,
             parameters: ["messageId": .string(id), "permanent": .bool(permanent)]
@@ -287,11 +292,12 @@ public actor AccountOrchestrator {
     }
 
     @discardableResult
-    public func updateFlags(account: String, id: String, add: [EmailFlag] = [], remove: [EmailFlag] = []) async throws -> EmailSummary {
+    public func updateFlags(account: String, id: String, add: [EmailFlag] = [], remove: [EmailFlag] = [], interface: AgentInterface = .cli) async throws -> EmailSummary {
         let mgr = try emailManager(for: account)
         let updated = try await mgr.updateFlags(id: id, add: add, remove: remove)
 
         try auditSuccess(
+            interface: interface,
             operation: "email.updateFlags",
             account: account,
             parameters: [
@@ -320,22 +326,24 @@ public actor AccountOrchestrator {
         return try await mgr.listFolders()
     }
 
-    public func createFolder(account: String, name: String, parent: String? = nil) async throws {
+    public func createFolder(account: String, name: String, parent: String? = nil, interface: AgentInterface = .cli) async throws {
         let mgr = try emailManager(for: account)
         try await mgr.createFolder(name: name, parent: parent)
 
         try auditSuccess(
+            interface: interface,
             operation: "email.createFolder",
             account: account,
             parameters: ["name": .string(name)]
         )
     }
 
-    public func deleteFolder(account: String, path: String) async throws {
+    public func deleteFolder(account: String, path: String, interface: AgentInterface = .cli) async throws {
         let mgr = try emailManager(for: account)
         try await mgr.deleteFolder(path: path)
 
         try auditSuccess(
+            interface: interface,
             operation: "email.deleteFolder",
             account: account,
             parameters: ["path": .string(path)]
@@ -359,11 +367,12 @@ public actor AccountOrchestrator {
         return try await mgr.listEvents(from: from, to: to, calendar: calendar)
     }
 
-    public func createEvent(account: String, _ request: CreateEventRequest) async throws -> CalendarEvent {
+    public func createEvent(account: String, _ request: CreateEventRequest, interface: AgentInterface = .cli) async throws -> CalendarEvent {
         let mgr = try calendarManager(for: account)
         let event = try await mgr.createEvent(request)
 
         try auditSuccess(
+            interface: interface,
             operation: "calendar.createEvent",
             account: account,
             parameters: ["title": .string(request.title)]
@@ -372,11 +381,12 @@ public actor AccountOrchestrator {
         return event
     }
 
-    public func updateEvent(account: String, id: String, _ request: UpdateEventRequest) async throws -> CalendarEvent {
+    public func updateEvent(account: String, id: String, _ request: UpdateEventRequest, interface: AgentInterface = .cli) async throws -> CalendarEvent {
         let mgr = try calendarManager(for: account)
         let event = try await mgr.updateEvent(id: id, request)
 
         try auditSuccess(
+            interface: interface,
             operation: "calendar.updateEvent",
             account: account,
             parameters: ["id": .string(id)]
@@ -385,11 +395,12 @@ public actor AccountOrchestrator {
         return event
     }
 
-    public func deleteEvent(account: String, id: String) async throws {
+    public func deleteEvent(account: String, id: String, interface: AgentInterface = .cli) async throws {
         let mgr = try calendarManager(for: account)
         try await mgr.deleteEvent(id: id)
 
         try auditSuccess(
+            interface: interface,
             operation: "calendar.deleteEvent",
             account: account,
             parameters: ["id": .string(id)]
@@ -408,11 +419,12 @@ public actor AccountOrchestrator {
         return try await mgr.listContacts(addressBook: addressBook, query: query, limit: limit, offset: offset)
     }
 
-    public func createContact(account: String, _ request: CreateContactRequest) async throws -> Contact {
+    public func createContact(account: String, _ request: CreateContactRequest, interface: AgentInterface = .cli) async throws -> Contact {
         let mgr = try contactsManager(for: account)
         let contact = try await mgr.createContact(request)
 
         try auditSuccess(
+            interface: interface,
             operation: "contacts.create",
             account: account,
             parameters: ["displayName": .string(request.displayName)]
@@ -421,11 +433,12 @@ public actor AccountOrchestrator {
         return contact
     }
 
-    public func updateContact(account: String, id: String, _ request: UpdateContactRequest) async throws -> Contact {
+    public func updateContact(account: String, id: String, _ request: UpdateContactRequest, interface: AgentInterface = .cli) async throws -> Contact {
         let mgr = try contactsManager(for: account)
         let contact = try await mgr.updateContact(id: id, request)
 
         try auditSuccess(
+            interface: interface,
             operation: "contacts.update",
             account: account,
             parameters: ["id": .string(id)]
@@ -434,11 +447,12 @@ public actor AccountOrchestrator {
         return contact
     }
 
-    public func deleteContact(account: String, id: String) async throws {
+    public func deleteContact(account: String, id: String, interface: AgentInterface = .cli) async throws {
         let mgr = try contactsManager(for: account)
         try await mgr.deleteContact(id: id)
 
         try auditSuccess(
+            interface: interface,
             operation: "contacts.delete",
             account: account,
             parameters: ["id": .string(id)]
@@ -457,11 +471,12 @@ public actor AccountOrchestrator {
         return try await mgr.listTasks(taskList: taskList, includeCompleted: includeCompleted)
     }
 
-    public func createTask(account: String, _ request: CreateTaskRequest) async throws -> TaskItem {
+    public func createTask(account: String, _ request: CreateTaskRequest, interface: AgentInterface = .cli) async throws -> TaskItem {
         let mgr = try taskManager(for: account)
         let task = try await mgr.createTask(request)
 
         try auditSuccess(
+            interface: interface,
             operation: "tasks.create",
             account: account,
             parameters: ["title": .string(request.title)]
@@ -470,11 +485,12 @@ public actor AccountOrchestrator {
         return task
     }
 
-    public func updateTask(account: String, id: String, _ request: UpdateTaskRequest) async throws -> TaskItem {
+    public func updateTask(account: String, id: String, _ request: UpdateTaskRequest, interface: AgentInterface = .cli) async throws -> TaskItem {
         let mgr = try taskManager(for: account)
         let task = try await mgr.updateTask(id: id, request)
 
         try auditSuccess(
+            interface: interface,
             operation: "tasks.update",
             account: account,
             parameters: ["id": .string(id)]
@@ -483,11 +499,12 @@ public actor AccountOrchestrator {
         return task
     }
 
-    public func deleteTask(account: String, id: String) async throws {
+    public func deleteTask(account: String, id: String, interface: AgentInterface = .cli) async throws {
         let mgr = try taskManager(for: account)
         try await mgr.deleteTask(id: id)
 
         try auditSuccess(
+            interface: interface,
             operation: "tasks.delete",
             account: account,
             parameters: ["id": .string(id)]
@@ -533,14 +550,15 @@ public actor AccountOrchestrator {
         }
     }
 
-    private func auditSuccess(
+    func auditSuccess(
+        interface: AgentInterface,
         operation: String,
         account: String,
         parameters: [String: AnyCodableValue],
         details: [String: AnyCodableValue]? = nil
     ) throws {
         try auditLog.log(entry: AuditEntry(
-            interface: agentInterface ?? .cli,
+            interface: interface,
             operation: operation,
             account: account,
             parameters: parameters,
@@ -688,8 +706,8 @@ extension Credentials {
         switch self {
         case .password(let password):
             return .password(username: username, password: password)
-        case .oauth2(let accessToken, _, _):
-            return .oauth2(username: username, accessToken: accessToken)
+        case .oauth2(let tokenProvider):
+            return .oauth2(username: username, tokenProvider: tokenProvider)
         }
     }
 
@@ -697,8 +715,8 @@ extension Credentials {
         switch self {
         case .password(let password):
             return .password(username: username, password: password)
-        case .oauth2(let accessToken, _, _):
-            return .oauthToken(accessToken)
+        case .oauth2(let tokenProvider):
+            return .oauthToken(tokenProvider)
         }
     }
 
@@ -706,8 +724,8 @@ extension Credentials {
         switch self {
         case .password(let password):
             return .password(username: username, password: password)
-        case .oauth2(let accessToken, _, _):
-            return .oauthToken(accessToken)
+        case .oauth2(let tokenProvider):
+            return .oauthToken(tokenProvider)
         }
     }
 }

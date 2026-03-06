@@ -76,7 +76,8 @@ enum EmailRoutes {
                 try await orchestrator.createFolder(
                     account: body.account,
                     name: body.name,
-                    parent: body.parent
+                    parent: body.parent,
+                    interface: .rest
                 )
                 return jsonResponse(["ok": true], status: .created)
             } catch let error as ClawMailError {
@@ -94,7 +95,7 @@ enum EmailRoutes {
                     return badRequestResponse("Missing folder path")
                 }
                 let decodedPath = path.removingPercentEncoding ?? path
-                try await orchestrator.deleteFolder(account: account, path: decodedPath)
+                try await orchestrator.deleteFolder(account: account, path: decodedPath, interface: .rest)
                 return jsonResponse(["ok": true])
             } catch let error as ClawMailError {
                 return clawMailErrorResponse(error)
@@ -107,7 +108,7 @@ enum EmailRoutes {
         group.post("send") { request, context -> Response in
             do {
                 let body = try await decodeBody(SendEmailRequest.self, from: request, context: context)
-                let messageId = try await orchestrator.sendMessage(body)
+                let messageId = try await orchestrator.sendMessage(body, interface: .rest)
                 return jsonResponse(["messageId": messageId], status: .created)
             } catch let error as ClawMailError {
                 return clawMailErrorResponse(error)
@@ -120,7 +121,7 @@ enum EmailRoutes {
         group.post("reply") { request, context -> Response in
             do {
                 let body = try await decodeBody(ReplyEmailRequest.self, from: request, context: context)
-                let messageId = try await orchestrator.replyToMessage(body)
+                let messageId = try await orchestrator.replyToMessage(body, interface: .rest)
                 return jsonResponse(["messageId": messageId], status: .created)
             } catch let error as ClawMailError {
                 return clawMailErrorResponse(error)
@@ -133,7 +134,7 @@ enum EmailRoutes {
         group.post("forward") { request, context -> Response in
             do {
                 let body = try await decodeBody(ForwardEmailRequest.self, from: request, context: context)
-                let messageId = try await orchestrator.forwardMessage(body)
+                let messageId = try await orchestrator.forwardMessage(body, interface: .rest)
                 return jsonResponse(["messageId": messageId], status: .created)
             } catch let error as ClawMailError {
                 return clawMailErrorResponse(error)
@@ -171,7 +172,8 @@ enum EmailRoutes {
                     try await orchestrator.moveMessage(
                         account: body.account,
                         id: messageId,
-                        to: destination
+                        to: destination,
+                        interface: .rest
                     )
                 }
 
@@ -180,14 +182,16 @@ enum EmailRoutes {
                     try await orchestrator.updateFlags(
                         account: body.account,
                         id: messageId,
-                        add: addFlags
+                        add: addFlags,
+                        interface: .rest
                     )
                 }
                 if let removeFlags = body.removeFlags, !removeFlags.isEmpty {
                     try await orchestrator.updateFlags(
                         account: body.account,
                         id: messageId,
-                        remove: removeFlags
+                        remove: removeFlags,
+                        interface: .rest
                     )
                 }
 
@@ -211,7 +215,8 @@ enum EmailRoutes {
                 try await orchestrator.deleteMessage(
                     account: account,
                     id: messageId,
-                    permanent: permanent
+                    permanent: permanent,
+                    interface: .rest
                 )
                 return jsonResponse(["ok": true])
             } catch let error as ClawMailError {

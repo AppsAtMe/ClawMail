@@ -10,7 +10,7 @@ public actor IPCDispatcher {
     }
 
     /// Parse and dispatch a raw JSON-RPC request, returning a response.
-    public func dispatch(_ data: Data) async -> JSONRPCResponse {
+    public func dispatch(_ data: Data, interface: AgentInterface) async -> JSONRPCResponse {
         let request: JSONRPCRequest
         do {
             request = try decodeJSONRPC(JSONRPCRequest.self, from: data)
@@ -19,7 +19,7 @@ public actor IPCDispatcher {
         }
 
         do {
-            let result = try await handleMethod(request.method, params: request.params ?? [:])
+            let result = try await handleMethod(request.method, params: request.params ?? [:], interface: interface)
             return .success(id: request.id, result: result)
         } catch let error as ClawMailError {
             return JSONRPCResponse(id: request.id, error: .from(error))
@@ -30,43 +30,43 @@ public actor IPCDispatcher {
 
     // MARK: - Method Routing
 
-    private func handleMethod(_ method: String, params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleMethod(_ method: String, params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         switch method {
         // Email operations
         case "email.list": return try await handleEmailList(params)
         case "email.read": return try await handleEmailRead(params)
-        case "email.send": return try await handleEmailSend(params)
-        case "email.reply": return try await handleEmailReply(params)
-        case "email.forward": return try await handleEmailForward(params)
-        case "email.move": return try await handleEmailMove(params)
-        case "email.delete": return try await handleEmailDelete(params)
-        case "email.updateFlags": return try await handleEmailUpdateFlags(params)
+        case "email.send": return try await handleEmailSend(params, interface: interface)
+        case "email.reply": return try await handleEmailReply(params, interface: interface)
+        case "email.forward": return try await handleEmailForward(params, interface: interface)
+        case "email.move": return try await handleEmailMove(params, interface: interface)
+        case "email.delete": return try await handleEmailDelete(params, interface: interface)
+        case "email.updateFlags": return try await handleEmailUpdateFlags(params, interface: interface)
         case "email.search": return try await handleEmailSearch(params)
         case "email.listFolders": return try await handleEmailListFolders(params)
-        case "email.createFolder": return try await handleEmailCreateFolder(params)
-        case "email.deleteFolder": return try await handleEmailDeleteFolder(params)
+        case "email.createFolder": return try await handleEmailCreateFolder(params, interface: interface)
+        case "email.deleteFolder": return try await handleEmailDeleteFolder(params, interface: interface)
         case "email.downloadAttachment": return try await handleEmailDownloadAttachment(params)
 
         // Calendar operations
         case "calendar.listCalendars": return try await handleCalendarListCalendars(params)
         case "calendar.listEvents": return try await handleCalendarListEvents(params)
-        case "calendar.createEvent": return try await handleCalendarCreateEvent(params)
-        case "calendar.updateEvent": return try await handleCalendarUpdateEvent(params)
-        case "calendar.deleteEvent": return try await handleCalendarDeleteEvent(params)
+        case "calendar.createEvent": return try await handleCalendarCreateEvent(params, interface: interface)
+        case "calendar.updateEvent": return try await handleCalendarUpdateEvent(params, interface: interface)
+        case "calendar.deleteEvent": return try await handleCalendarDeleteEvent(params, interface: interface)
 
         // Contact operations
         case "contacts.listAddressBooks": return try await handleContactsListAddressBooks(params)
         case "contacts.list": return try await handleContactsList(params)
-        case "contacts.create": return try await handleContactsCreate(params)
-        case "contacts.update": return try await handleContactsUpdate(params)
-        case "contacts.delete": return try await handleContactsDelete(params)
+        case "contacts.create": return try await handleContactsCreate(params, interface: interface)
+        case "contacts.update": return try await handleContactsUpdate(params, interface: interface)
+        case "contacts.delete": return try await handleContactsDelete(params, interface: interface)
 
         // Task operations
         case "tasks.listTaskLists": return try await handleTasksListTaskLists(params)
         case "tasks.list": return try await handleTasksList(params)
-        case "tasks.create": return try await handleTasksCreate(params)
-        case "tasks.update": return try await handleTasksUpdate(params)
-        case "tasks.delete": return try await handleTasksDelete(params)
+        case "tasks.create": return try await handleTasksCreate(params, interface: interface)
+        case "tasks.update": return try await handleTasksUpdate(params, interface: interface)
+        case "tasks.delete": return try await handleTasksDelete(params, interface: interface)
 
         // Audit & status
         case "audit.list": return try await handleAuditList(params)
@@ -169,7 +169,7 @@ public actor IPCDispatcher {
         return try encodableToValue(message)
     }
 
-    private func handleEmailSend(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleEmailSend(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let to = try requireEmailAddresses(params, "to")
         let subject = try requireString(params, "subject")
@@ -188,11 +188,11 @@ public actor IPCDispatcher {
             subject: subject, body: body, bodyHtml: bodyHtml,
             attachments: attachments
         )
-        let messageId = try await orchestrator.sendMessage(request)
+        let messageId = try await orchestrator.sendMessage(request, interface: interface)
         return .dictionary(["messageId": .string(messageId)])
     }
 
-    private func handleEmailReply(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleEmailReply(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let originalMessageId = try requireString(params, "originalMessageId")
         let body = try requireString(params, "body")
@@ -202,11 +202,11 @@ public actor IPCDispatcher {
             account: account, originalMessageId: originalMessageId,
             body: body, replyAll: replyAll
         )
-        let messageId = try await orchestrator.replyToMessage(request)
+        let messageId = try await orchestrator.replyToMessage(request, interface: interface)
         return .dictionary(["messageId": .string(messageId)])
     }
 
-    private func handleEmailForward(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleEmailForward(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let originalMessageId = try requireString(params, "originalMessageId")
         let to = try requireEmailAddresses(params, "to")
@@ -216,27 +216,27 @@ public actor IPCDispatcher {
             account: account, originalMessageId: originalMessageId,
             to: to, body: body
         )
-        let messageId = try await orchestrator.forwardMessage(request)
+        let messageId = try await orchestrator.forwardMessage(request, interface: interface)
         return .dictionary(["messageId": .string(messageId)])
     }
 
-    private func handleEmailMove(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleEmailMove(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let id = try requireString(params, "id")
         let folder = try requireString(params, "folder")
-        try await orchestrator.moveMessage(account: account, id: id, to: folder)
+        try await orchestrator.moveMessage(account: account, id: id, to: folder, interface: interface)
         return .dictionary(["success": .bool(true)])
     }
 
-    private func handleEmailDelete(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleEmailDelete(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let id = try requireString(params, "id")
         let permanent = optionalBool(params, "permanent") ?? false
-        try await orchestrator.deleteMessage(account: account, id: id, permanent: permanent)
+        try await orchestrator.deleteMessage(account: account, id: id, permanent: permanent, interface: interface)
         return .dictionary(["success": .bool(true)])
     }
 
-    private func handleEmailUpdateFlags(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleEmailUpdateFlags(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let id = try requireString(params, "id")
         var addFlags: [EmailFlag] = []
@@ -247,7 +247,7 @@ public actor IPCDispatcher {
         if case .array(let arr) = params["remove"] {
             removeFlags = arr.compactMap { if case .string(let s) = $0 { return EmailFlag(rawValue: s) } else { return nil } }
         }
-        let updated = try await orchestrator.updateFlags(account: account, id: id, add: addFlags, remove: removeFlags)
+        let updated = try await orchestrator.updateFlags(account: account, id: id, add: addFlags, remove: removeFlags, interface: interface)
         return try encodableToValue(updated)
     }
 
@@ -267,18 +267,18 @@ public actor IPCDispatcher {
         return try encodableToValue(folders)
     }
 
-    private func handleEmailCreateFolder(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleEmailCreateFolder(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let name = try requireString(params, "name")
         let parent = optionalString(params, "parent")
-        try await orchestrator.createFolder(account: account, name: name, parent: parent)
+        try await orchestrator.createFolder(account: account, name: name, parent: parent, interface: interface)
         return .dictionary(["success": .bool(true)])
     }
 
-    private func handleEmailDeleteFolder(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleEmailDeleteFolder(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let path = try requireString(params, "path")
-        try await orchestrator.deleteFolder(account: account, path: path)
+        try await orchestrator.deleteFolder(account: account, path: path, interface: interface)
         return .dictionary(["success": .bool(true)])
     }
 
@@ -314,25 +314,25 @@ public actor IPCDispatcher {
         return try encodableToValue(events)
     }
 
-    private func handleCalendarCreateEvent(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleCalendarCreateEvent(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let request = try decodeFromParams(CreateEventRequest.self, params: params)
-        let event = try await orchestrator.createEvent(account: account, request)
+        let event = try await orchestrator.createEvent(account: account, request, interface: interface)
         return try encodableToValue(event)
     }
 
-    private func handleCalendarUpdateEvent(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleCalendarUpdateEvent(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let id = try requireString(params, "id")
         let request = try decodeFromParams(UpdateEventRequest.self, params: params)
-        let event = try await orchestrator.updateEvent(account: account, id: id, request)
+        let event = try await orchestrator.updateEvent(account: account, id: id, request, interface: interface)
         return try encodableToValue(event)
     }
 
-    private func handleCalendarDeleteEvent(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleCalendarDeleteEvent(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let id = try requireString(params, "id")
-        try await orchestrator.deleteEvent(account: account, id: id)
+        try await orchestrator.deleteEvent(account: account, id: id, interface: interface)
         return .dictionary(["success": .bool(true)])
     }
 
@@ -354,25 +354,25 @@ public actor IPCDispatcher {
         return try encodableToValue(contacts)
     }
 
-    private func handleContactsCreate(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleContactsCreate(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let request = try decodeFromParams(CreateContactRequest.self, params: params)
-        let contact = try await orchestrator.createContact(account: account, request)
+        let contact = try await orchestrator.createContact(account: account, request, interface: interface)
         return try encodableToValue(contact)
     }
 
-    private func handleContactsUpdate(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleContactsUpdate(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let id = try requireString(params, "id")
         let request = try decodeFromParams(UpdateContactRequest.self, params: params)
-        let contact = try await orchestrator.updateContact(account: account, id: id, request)
+        let contact = try await orchestrator.updateContact(account: account, id: id, request, interface: interface)
         return try encodableToValue(contact)
     }
 
-    private func handleContactsDelete(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleContactsDelete(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let id = try requireString(params, "id")
-        try await orchestrator.deleteContact(account: account, id: id)
+        try await orchestrator.deleteContact(account: account, id: id, interface: interface)
         return .dictionary(["success": .bool(true)])
     }
 
@@ -392,25 +392,25 @@ public actor IPCDispatcher {
         return try encodableToValue(tasks)
     }
 
-    private func handleTasksCreate(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleTasksCreate(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let request = try decodeFromParams(CreateTaskRequest.self, params: params)
-        let task = try await orchestrator.createTask(account: account, request)
+        let task = try await orchestrator.createTask(account: account, request, interface: interface)
         return try encodableToValue(task)
     }
 
-    private func handleTasksUpdate(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleTasksUpdate(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let id = try requireString(params, "id")
         let request = try decodeFromParams(UpdateTaskRequest.self, params: params)
-        let task = try await orchestrator.updateTask(account: account, id: id, request)
+        let task = try await orchestrator.updateTask(account: account, id: id, request, interface: interface)
         return try encodableToValue(task)
     }
 
-    private func handleTasksDelete(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleTasksDelete(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let id = try requireString(params, "id")
-        try await orchestrator.deleteTask(account: account, id: id)
+        try await orchestrator.deleteTask(account: account, id: id, interface: interface)
         return .dictionary(["success": .bool(true)])
     }
 

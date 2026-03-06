@@ -59,7 +59,7 @@ enum CalendarRoutes {
         group.post("events") { request, context -> Response in
             do {
                 let body = try await decodeBody(CreateEventRequest.self, from: request, context: context)
-                let event = try await orchestrator.createEvent(account: body.account, body)
+                let event = try await orchestrator.createEvent(account: body.account, body, interface: .rest)
                 return jsonResponse(event, status: .created)
             } catch let error as ClawMailError {
                 return clawMailErrorResponse(error)
@@ -78,7 +78,8 @@ enum CalendarRoutes {
                 let event = try await orchestrator.updateEvent(
                     account: body.account,
                     id: eventId,
-                    body
+                    body,
+                    interface: .rest
                 )
                 return jsonResponse(event)
             } catch let error as ClawMailError {
@@ -95,7 +96,7 @@ enum CalendarRoutes {
                 guard let eventId = context.parameters.get("eventId") else {
                     return badRequestResponse("Missing eventId")
                 }
-                try await orchestrator.deleteEvent(account: account, id: eventId)
+                try await orchestrator.deleteEvent(account: account, id: eventId, interface: .rest)
                 return jsonResponse(["ok": true])
             } catch let error as ClawMailError {
                 return clawMailErrorResponse(error)

@@ -124,6 +124,7 @@ let package = Package(
             name: "ClawMailAppTests",
             dependencies: [
                 "ClawMailApp",
+                "ClawMailCore",
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

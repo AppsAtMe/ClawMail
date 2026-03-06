@@ -47,7 +47,7 @@ enum TasksRoutes {
         group.post { request, context -> Response in
             do {
                 let body = try await decodeBody(CreateTaskRequest.self, from: request, context: context)
-                let task = try await orchestrator.createTask(account: body.account, body)
+                let task = try await orchestrator.createTask(account: body.account, body, interface: .rest)
                 return jsonResponse(task, status: .created)
             } catch let error as ClawMailError {
                 return clawMailErrorResponse(error)
@@ -66,7 +66,8 @@ enum TasksRoutes {
                 let task = try await orchestrator.updateTask(
                     account: body.account,
                     id: taskId,
-                    body
+                    body,
+                    interface: .rest
                 )
                 return jsonResponse(task)
             } catch let error as ClawMailError {
@@ -83,7 +84,7 @@ enum TasksRoutes {
                 guard let taskId = context.parameters.get("taskId") else {
                     return badRequestResponse("Missing taskId")
                 }
-                try await orchestrator.deleteTask(account: account, id: taskId)
+                try await orchestrator.deleteTask(account: account, id: taskId, interface: .rest)
                 return jsonResponse(["ok": true])
             } catch let error as ClawMailError {
                 return clawMailErrorResponse(error)

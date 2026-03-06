@@ -103,7 +103,7 @@ Add to your Claude Code `.mcp.json` or MCP settings:
 }
 ```
 
-ClawMail provides 28 MCP tools across email, calendar, contacts, tasks, and administration. It also pushes server-initiated notifications for new mail, connection status changes, and errors.
+ClawMail provides 34 MCP tools across email, calendar, contacts, tasks, and administration. It also pushes server-initiated notifications for new mail, connection status changes, and errors.
 
 Only one MCP session is allowed at a time (exclusive agent lock). CLI sessions run concurrently alongside.
 
@@ -298,9 +298,11 @@ ClawMail/
   Sources/
     ClawMailCore/       # Shared library: models, protocol clients, business logic
       Models/           #   Data models (Account, EmailSummary, CalendarEvent, etc.)
-      Email/            #   IMAP client, SMTP client, EmailManager, search engine
+      Email/            #   IMAP client, SMTP client, EmailManager
+      Search/           #   SearchEngine (FTS5 query building)
       Calendar/         #   CalDAV client, CalendarManager
       Contacts/         #   CardDAV client, ContactsManager
+      Tasks/            #   TaskManager, VTODOParser
       Auth/             #   OAuth2Manager, OAuthHelpers
       Storage/          #   MetadataIndex (SQLite/FTS5), CredentialStore, AuditLog
       Guardrails/       #   GuardrailEngine

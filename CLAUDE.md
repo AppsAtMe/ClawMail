@@ -41,9 +41,10 @@ The macOS app runs as a menu bar daemon (LSUIElement). CLI and MCP are separate 
 
 ## Project Structure
 
-Four build targets in Package.swift:
+Five build targets in Package.swift:
 - `ClawMailCore` — shared library (models, protocol clients, business logic)
-- `ClawMailApp` — macOS menu bar app (SwiftUI, embeds REST API + IPC server)
+- `ClawMailAppLib` — REST API library (routes, middlewares, helpers)
+- `ClawMailApp` — macOS menu bar app (SwiftUI, imports ClawMailAppLib)
 - `ClawMailCLI` — CLI tool (`clawmail` command)
 - `ClawMailMCP` — MCP stdio server
 

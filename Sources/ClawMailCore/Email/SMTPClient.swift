@@ -97,17 +97,19 @@ public actor SMTPClient {
     private let security: ConnectionSecurity
     private let credentials: Credentials
     private let senderEmail: String
+    private let verifyCertificates: Bool
 
     private var group: EventLoopGroup?
     private var channel: Channel?
     private let responseQueue = SMTPResponseQueue()
 
-    public init(host: String, port: Int, security: ConnectionSecurity, credentials: Credentials, senderEmail: String) {
+    public init(host: String, port: Int, security: ConnectionSecurity, credentials: Credentials, senderEmail: String, verifyCertificates: Bool = true) {
         self.host = host
         self.port = port
         self.security = security
         self.credentials = credentials
         self.senderEmail = senderEmail
+        self.verifyCertificates = verifyCertificates
     }
 
     // MARK: - Connection
@@ -126,6 +128,7 @@ public actor SMTPClient {
         let sslContext: NIOSSLContext?
         if useSSL {
             var config = TLSConfiguration.makeClientConfiguration()
+            config.certificateVerification = verifyCertificates ? .fullVerification : .none
             config.trustRoots = .default
             sslContext = try NIOSSLContext(configuration: config)
         } else {
@@ -180,6 +183,7 @@ public actor SMTPClient {
                     throw ClawMailError.connectionError("STARTTLS failed: \(starttlsResponse.message)")
                 }
                 var starttlsConfig = TLSConfiguration.makeClientConfiguration()
+                starttlsConfig.certificateVerification = verifyCertificates ? .fullVerification : .none
                 starttlsConfig.trustRoots = .default
                 let tlsContext = try NIOSSLContext(configuration: starttlsConfig)
                 let sslHandler = try NIOSSLClientHandler(context: tlsContext, serverHostname: host)

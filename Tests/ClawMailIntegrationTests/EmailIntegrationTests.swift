@@ -14,14 +14,15 @@ struct EmailIntegrationTests {
 
         let account = TestConfig.testAccount()
         let credential = IMAPCredential.password(
-            username: TestConfig.testUser,
+            username: TestConfig.testLogin,
             password: TestConfig.testPass
         )
         let client = IMAPClient(
             host: account.imapHost,
             port: account.imapPort,
             security: account.imapSecurity,
-            credential: credential
+            credential: credential,
+            verifyCertificates: false  // GreenMail uses self-signed certs
         )
 
         try await client.connect()
@@ -41,10 +42,11 @@ struct EmailIntegrationTests {
         let creds = Credentials.password(TestConfig.senderPass)
         let client = SMTPClient(
             host: TestConfig.smtpHost,
-            port: TestConfig.smtpPort,
-            security: .starttls,
+            port: TestConfig.smtpsPort,
+            security: .ssl,
             credentials: creds,
-            senderEmail: TestConfig.senderUser
+            senderEmail: TestConfig.senderLogin,  // GreenMail auth uses login part only
+            verifyCertificates: false  // GreenMail uses self-signed certs
         )
 
         try await client.connect()

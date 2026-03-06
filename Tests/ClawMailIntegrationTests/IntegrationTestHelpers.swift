@@ -4,17 +4,21 @@ import Foundation
 /// Test constants for the GreenMail + Radicale Docker test infrastructure.
 enum TestConfig {
     // GreenMail IMAP/SMTP
-    static let imapHost = "127.0.0.1"
+    // Use "localhost" (not 127.0.0.1) so NIO-SSL can set SNI hostname for TLS
+    static let imapHost = "localhost"
     static let imapPort = 3143
     static let imapsPort = 3993
-    static let smtpHost = "127.0.0.1"
+    static let smtpHost = "localhost"
     static let smtpPort = 3025
     static let smtpsPort = 3465
 
     // Test users (configured in docker-compose.yml)
+    // GreenMail auth uses the login part only (before @), not the full email
     static let testUser = "testuser@clawmail.test"
+    static let testLogin = "testuser"
     static let testPass = "testpass"
     static let senderUser = "sender@clawmail.test"
+    static let senderLogin = "sender"
     static let senderPass = "senderpass"
 
     // Radicale CalDAV/CardDAV
@@ -49,6 +53,7 @@ enum TestConfig {
     }
 
     /// Create a test Account pointing to local GreenMail.
+    /// Uses SSL ports (3993/3465) because GreenMail's plaintext ports don't support STARTTLS.
     static func testAccount(label: String = "test") -> Account {
         Account(
             label: label,
@@ -56,11 +61,11 @@ enum TestConfig {
             displayName: "Test User",
             authMethod: .password,
             imapHost: imapHost,
-            imapPort: imapPort,
-            imapSecurity: .starttls,
+            imapPort: imapsPort,
+            imapSecurity: .ssl,
             smtpHost: smtpHost,
-            smtpPort: smtpPort,
-            smtpSecurity: .starttls
+            smtpPort: smtpsPort,
+            smtpSecurity: .ssl
         )
     }
 
@@ -72,11 +77,11 @@ enum TestConfig {
             displayName: "Sender User",
             authMethod: .password,
             imapHost: imapHost,
-            imapPort: imapPort,
-            imapSecurity: .starttls,
+            imapPort: imapsPort,
+            imapSecurity: .ssl,
             smtpHost: smtpHost,
-            smtpPort: smtpPort,
-            smtpSecurity: .starttls
+            smtpPort: smtpsPort,
+            smtpSecurity: .ssl
         )
     }
 

@@ -342,6 +342,7 @@ public actor IMAPClient {
     private let port: Int
     private let security: ConnectionSecurity
     private let credential: IMAPCredential
+    private let verifyCertificates: Bool
 
     private var eventLoopGroup: MultiThreadedEventLoopGroup?
     private var channel: Channel?
@@ -360,12 +361,14 @@ public actor IMAPClient {
         host: String,
         port: Int,
         security: ConnectionSecurity,
-        credential: IMAPCredential
+        credential: IMAPCredential,
+        verifyCertificates: Bool = true
     ) {
         self.host = host
         self.port = port
         self.security = security
         self.credential = credential
+        self.verifyCertificates = verifyCertificates
     }
 
     // MARK: - Tag Generation
@@ -395,8 +398,7 @@ public actor IMAPClient {
         let sslContext: NIOSSLContext?
         if useTLS {
             var config = TLSConfiguration.makeClientConfiguration()
-            config.certificateVerification = .fullVerification
-            // Use the system certificate store (macOS Keychain) for trust evaluation
+            config.certificateVerification = verifyCertificates ? .fullVerification : .none
             config.trustRoots = .default
             sslContext = try NIOSSLContext(configuration: config)
         } else {
@@ -453,7 +455,7 @@ public actor IMAPClient {
         }
 
         var config = TLSConfiguration.makeClientConfiguration()
-        config.certificateVerification = .fullVerification
+        config.certificateVerification = verifyCertificates ? .fullVerification : .none
         config.trustRoots = .default
         let sslContext = try NIOSSLContext(configuration: config)
         let sslHandler = try NIOSSLClientHandler(context: sslContext, serverHostname: host)

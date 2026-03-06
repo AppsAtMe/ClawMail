@@ -32,6 +32,9 @@ let package = Package(
 
         // Keychain
         .package(url: "https://github.com/kishikawakatsumi/KeychainAccess.git", from: "4.2.2"),
+
+        // Test utilities
+        .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.3"),
     ],
     targets: [
         // MARK: - ClawMailCore (shared library)
@@ -125,6 +128,7 @@ let package = Package(
             dependencies: [
                 "ClawMailApp",
                 "ClawMailCore",
+                .product(name: "ViewInspector", package: "ViewInspector"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

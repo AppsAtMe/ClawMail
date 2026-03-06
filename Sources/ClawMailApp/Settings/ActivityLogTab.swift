@@ -3,7 +3,9 @@ import ClawMailCore
 
 /// Activity log tab: scrollable, filterable audit log viewer.
 struct ActivityLogTab: View {
-    @Environment(AppState.self) private var appState
+    @Environment(AppState.self) private var environmentAppState
+    private let appStateOverride: AppState?
+    private let loadEntriesAction: @MainActor (AppState, String?) async throws -> [AuditEntry]
 
     @State private var entries: [AuditEntry] = []
     @State private var accountFilter: String?
@@ -12,6 +14,16 @@ struct ActivityLogTab: View {
     @State private var errorState: UIErrorState?
 
     private let refreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+
+    init(
+        appState: AppState? = nil,
+        initialErrorState: UIErrorState? = nil,
+        loadEntriesAction: @escaping @MainActor (AppState, String?) async throws -> [AuditEntry] = Self.defaultLoadEntriesAction
+    ) {
+        self.appStateOverride = appState
+        self.loadEntriesAction = loadEntriesAction
+        _errorState = State(initialValue: initialErrorState)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -104,10 +116,9 @@ struct ActivityLogTab: View {
     }
 
     private func loadEntries() {
-        guard let orchestrator = appState.orchestrator else { return }
         Task {
             do {
-                let results = try await orchestrator.getAuditLog(account: accountFilter, limit: 500)
+                let results = try await loadEntriesAction(appState, accountFilter)
                 await MainActor.run {
                     entries = results
                 }
@@ -117,6 +128,15 @@ struct ActivityLogTab: View {
                 }
             }
         }
+    }
+
+    private var appState: AppState {
+        appStateOverride ?? environmentAppState
+    }
+
+    private static func defaultLoadEntriesAction(appState: AppState, accountFilter: String?) async throws -> [AuditEntry] {
+        guard let orchestrator = appState.orchestrator else { return [] }
+        return try await orchestrator.getAuditLog(account: accountFilter, limit: 500)
     }
 
     private func exportLog() {

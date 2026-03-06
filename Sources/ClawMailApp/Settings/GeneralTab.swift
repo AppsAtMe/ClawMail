@@ -3,7 +3,11 @@ import ClawMailCore
 
 /// General settings tab: launch at login, sync settings, audit retention.
 struct GeneralTab: View {
-    @Environment(AppState.self) private var appState
+    @Environment(AppState.self) private var environmentAppState
+    private let appStateOverride: AppState?
+    private let saveConfigAction: @MainActor (AppConfig) throws -> Void
+    private let installLaunchAgent: () -> Bool
+    private let uninstallLaunchAgent: () -> Bool
 
     @State private var launchAtLogin = true
     @State private var syncInterval = "15"
@@ -13,6 +17,20 @@ struct GeneralTab: View {
     @State private var newIdleFolder = ""
     @State private var showingResetConfirm = false
     @State private var errorState: UIErrorState?
+
+    init(
+        appState: AppState? = nil,
+        initialErrorState: UIErrorState? = nil,
+        saveConfigAction: @escaping @MainActor (AppConfig) throws -> Void = Self.defaultSaveConfigAction,
+        installLaunchAgent: @escaping () -> Bool = { LaunchAgentManager.install() },
+        uninstallLaunchAgent: @escaping () -> Bool = LaunchAgentManager.uninstall
+    ) {
+        self.appStateOverride = appState
+        self.saveConfigAction = saveConfigAction
+        self.installLaunchAgent = installLaunchAgent
+        self.uninstallLaunchAgent = uninstallLaunchAgent
+        _errorState = State(initialValue: initialErrorState)
+    }
 
     var body: some View {
         Form {
@@ -174,7 +192,7 @@ struct GeneralTab: View {
         let accounts = appState.config.accounts
         let updatedConfig = AppConfig(accounts: accounts)
         do {
-            try updatedConfig.save()
+            try saveConfigAction(updatedConfig)
             appState.config = updatedConfig
         } catch {
             errorState = UIErrorState(action: "Resetting settings", error: error)
@@ -183,11 +201,11 @@ struct GeneralTab: View {
         }
 
         if appState.config.launchAtLogin {
-            if !LaunchAgentManager.install() {
+            if !installLaunchAgent() {
                 errorState = UIErrorState(message: "Settings were reset, but enabling launch at login failed.")
             }
         } else {
-            if !LaunchAgentManager.uninstall() {
+            if !uninstallLaunchAgent() {
                 errorState = UIErrorState(message: "Settings were reset, but disabling launch at login failed.")
             }
         }
@@ -223,6 +241,10 @@ struct GeneralTab: View {
         )
     }
 
+    private var appState: AppState {
+        appStateOverride ?? environmentAppState
+    }
+
     private func updateLaunchAtLogin(_ enabled: Bool) {
         guard persistConfigChange(
             "Saving launch-at-login setting",
@@ -232,7 +254,7 @@ struct GeneralTab: View {
             return
         }
 
-        let succeeded = enabled ? LaunchAgentManager.install() : LaunchAgentManager.uninstall()
+        let succeeded = enabled ? installLaunchAgent() : uninstallLaunchAgent()
         if !succeeded {
             errorState = UIErrorState(message: "The setting was saved, but updating the macOS LaunchAgent failed.")
         }
@@ -248,7 +270,7 @@ struct GeneralTab: View {
         update(&updatedConfig)
 
         do {
-            try updatedConfig.save()
+            try saveConfigAction(updatedConfig)
             appState.config = updatedConfig
             onSuccess?()
             return true
@@ -256,5 +278,9 @@ struct GeneralTab: View {
             errorState = UIErrorState(action: action, error: error)
             return false
         }
+    }
+
+    private static func defaultSaveConfigAction(_ config: AppConfig) throws {
+        try config.save()
     }
 }

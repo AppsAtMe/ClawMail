@@ -3,7 +3,9 @@ import ClawMailCore
 
 /// API settings tab: REST API port, API key management, MCP config, webhook URL.
 struct APITab: View {
-    @Environment(AppState.self) private var appState
+    @Environment(AppState.self) private var environmentAppState
+    private let appStateOverride: AppState?
+    private let generateAPIKeyAction: @Sendable () async throws -> String
 
     @State private var port: String = "24601"
     @State private var apiKey: String = ""
@@ -16,6 +18,16 @@ struct APITab: View {
     @State private var microsoftClientId: String = ""
     @State private var microsoftClientSecret: String = ""
     @State private var errorState: UIErrorState?
+
+    init(
+        appState: AppState? = nil,
+        initialErrorState: UIErrorState? = nil,
+        generateAPIKeyAction: @escaping @Sendable () async throws -> String = Self.defaultGenerateAPIKeyAction
+    ) {
+        self.appStateOverride = appState
+        self.generateAPIKeyAction = generateAPIKeyAction
+        _errorState = State(initialValue: initialErrorState)
+    }
 
     var body: some View {
         Form {
@@ -258,9 +270,8 @@ struct APITab: View {
 
     private func regenerateAPIKey() {
         Task {
-            let km = KeychainManager()
             do {
-                let newKey = try await km.generateAPIKey()
+                let newKey = try await generateAPIKeyAction()
                 await MainActor.run { apiKey = newKey }
             } catch {
                 await MainActor.run {
@@ -275,6 +286,14 @@ struct APITab: View {
             get: { errorState != nil },
             set: { if !$0 { errorState = nil } }
         )
+    }
+
+    private var appState: AppState {
+        appStateOverride ?? environmentAppState
+    }
+
+    private static func defaultGenerateAPIKeyAction() async throws -> String {
+        try await KeychainManager().generateAPIKey()
     }
 
     @discardableResult

@@ -4,6 +4,34 @@ Date: March 6, 2026
 Repository: `/Users/andrewrmitchell/Developer/ClawMail`
 Purpose: Carry forward a full review into a fresh session with enough context to fix issues without re-reading the entire repo.
 
+## Session Update (March 6, 2026, previous latest)
+
+This handoff now reflects follow-up UI coverage for the settings error alerts that were added during the March 6 hardening sweep.
+
+Completed in this session:
+- Added app-level tests that verify the Accounts, Activity Log, API, General, and Guardrails settings tabs all render the "Operation Failed" alert with the expected message when an error state is present.
+- Introduced narrow test seams on the settings tabs so app tests can construct them without touching live config, launch agent, or orchestrator state.
+- Added `ViewInspector` as a test-only dependency for SwiftUI alert inspection in `ClawMailAppTests`.
+
+Current build/test status after these fixes:
+- `swift test`: passed
+- Test suite reported 172 passing tests across 24 suites
+
+New tests added in this session:
+- `Tests/ClawMailAppTests/SettingsErrorAlertTests.swift`
+
+Key implementation files changed in this session:
+- `Package.swift`
+- `Sources/ClawMailApp/Settings/AccountsTab.swift`
+- `Sources/ClawMailApp/Settings/ActivityLogTab.swift`
+- `Sources/ClawMailApp/Settings/APITab.swift`
+- `Sources/ClawMailApp/Settings/GeneralTab.swift`
+- `Sources/ClawMailApp/Settings/GuardrailsTab.swift`
+
+Next issue to start with:
+- The remaining follow-up from the broader review is still the low-risk `try?` sweep outside these settings flows, with `AppDelegate` notification setup and IPC cleanup paths still the most obvious candidates.
+- If we want deeper UI assurance beyond alert rendering, the next increment would be interaction-level settings tests that drive failing actions end-to-end.
+
 ## Session Update (March 6, 2026, newest latest)
 
 This handoff now reflects follow-up cleanup on the remaining low-risk `try?` / silent-failure paths that were still worth tightening after the original review findings were closed.

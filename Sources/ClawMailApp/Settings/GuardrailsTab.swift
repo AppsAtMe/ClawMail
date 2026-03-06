@@ -3,7 +3,9 @@ import ClawMailCore
 
 /// Guardrails settings tab: configure send rate limits, domain lists, recipient approval.
 struct GuardrailsTab: View {
-    @Environment(AppState.self) private var appState
+    @Environment(AppState.self) private var environmentAppState
+    private let appStateOverride: AppState?
+    private let loadApprovalStateAction: @MainActor (AppState) async throws -> ([ApprovedRecipient], [PendingApproval])
 
     @State private var rateLimitEnabled = false
     @State private var maxPerMinute = ""
@@ -23,6 +25,16 @@ struct GuardrailsTab: View {
     @State private var approvedRecipients: [ApprovedRecipient] = []
     @State private var pendingApprovals: [PendingApproval] = []
     @State private var errorState: UIErrorState?
+
+    init(
+        appState: AppState? = nil,
+        initialErrorState: UIErrorState? = nil,
+        loadApprovalStateAction: @escaping @MainActor (AppState) async throws -> ([ApprovedRecipient], [PendingApproval]) = Self.defaultLoadApprovalStateAction
+    ) {
+        self.appStateOverride = appState
+        self.loadApprovalStateAction = loadApprovalStateAction
+        _errorState = State(initialValue: initialErrorState)
+    }
 
     var body: some View {
         Form {
@@ -291,17 +303,9 @@ struct GuardrailsTab: View {
     }
 
     private func loadApprovalState() {
-        guard let orchestrator = appState.orchestrator else {
-            approvedRecipients = []
-            pendingApprovals = []
-            return
-        }
-
         Task {
             do {
-                async let recipients = orchestrator.listApprovedRecipients()
-                async let approvals = orchestrator.listPendingApprovals()
-                let (loadedRecipients, loadedApprovals) = try await (recipients, approvals)
+                let (loadedRecipients, loadedApprovals) = try await loadApprovalStateAction(appState)
 
                 await MainActor.run {
                     approvedRecipients = loadedRecipients
@@ -313,6 +317,17 @@ struct GuardrailsTab: View {
                 }
             }
         }
+    }
+
+    private var appState: AppState {
+        appStateOverride ?? environmentAppState
+    }
+
+    private static func defaultLoadApprovalStateAction(appState: AppState) async throws -> ([ApprovedRecipient], [PendingApproval]) {
+        guard let orchestrator = appState.orchestrator else { return ([], []) }
+        async let recipients = orchestrator.listApprovedRecipients()
+        async let approvals = orchestrator.listPendingApprovals()
+        return try await (recipients, approvals)
     }
 
     private var showingErrorAlert: Binding<Bool> {

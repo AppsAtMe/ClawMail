@@ -3,11 +3,25 @@ import ClawMailCore
 
 /// Accounts settings tab: list of configured accounts with add/remove/edit.
 struct AccountsTab: View {
-    @Environment(AppState.self) private var appState
+    @Environment(AppState.self) private var environmentAppState
+    private let appStateOverride: AppState?
+    private let removeAccountAction: @MainActor (AppState, Account) async throws -> Void
     @State private var selectedAccountId: UUID?
     @State private var showingSetup = false
     @State private var showingDeleteConfirm = false
     @State private var errorState: UIErrorState?
+
+    init(
+        appState: AppState? = nil,
+        initialSelectedAccountId: UUID? = nil,
+        initialErrorState: UIErrorState? = nil,
+        removeAccountAction: @escaping @MainActor (AppState, Account) async throws -> Void = Self.defaultRemoveAccountAction
+    ) {
+        self.appStateOverride = appState
+        self.removeAccountAction = removeAccountAction
+        _selectedAccountId = State(initialValue: initialSelectedAccountId)
+        _errorState = State(initialValue: initialErrorState)
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -96,12 +110,18 @@ struct AccountsTab: View {
         appState.accounts.first { $0.id == selectedAccountId }
     }
 
+    private var appState: AppState {
+        appStateOverride ?? environmentAppState
+    }
+
     private func removeAccount(_ account: Account) {
         Task {
             do {
-                try await appState.orchestrator?.removeAccount(label: account.label)
+                try await removeAccountAction(appState, account)
                 await appState.refreshAccounts()
-                selectedAccountId = nil
+                await MainActor.run {
+                    selectedAccountId = nil
+                }
             } catch {
                 await MainActor.run {
                     errorState = UIErrorState(action: "Removing account", error: error)
@@ -115,6 +135,10 @@ struct AccountsTab: View {
             get: { errorState != nil },
             set: { if !$0 { errorState = nil } }
         )
+    }
+
+    private static func defaultRemoveAccountAction(appState: AppState, account: Account) async throws {
+        try await appState.orchestrator?.removeAccount(label: account.label)
     }
 
     private func statusColor(for status: ConnectionStatus) -> Color {

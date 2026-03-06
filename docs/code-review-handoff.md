@@ -4,6 +4,37 @@ Date: March 6, 2026
 Repository: `/Users/andrewrmitchell/Developer/ClawMail`
 Purpose: Carry forward a full review into a fresh session with enough context to fix issues without re-reading the entire repo.
 
+## Session Update (March 6, 2026, newest latest)
+
+This handoff now reflects fixes through the pending-approval workflow observation that was still open after issues 1-10.
+
+Completed in this session:
+- Pending recipient approvals now persist the blocked outgoing request instead of only throwing an error. Send, reply, and forward requests are held in `pending_approvals`, keyed by a request ID, and replay once the required recipients are approved.
+- Pending approvals are now exposed through the orchestrator, JSON-RPC, REST routes, CLI commands, and the Guardrails settings tab. Held sends can be listed, approved, or rejected explicitly.
+- Ready held sends are retried automatically after approval, when the relevant account reconnects, and when first-time recipient approval is disabled at runtime.
+
+Current build/test status after these fixes:
+- `swift test`: passed
+- Test suite reported 159 passing tests across 22 suites
+
+New tests added in this session:
+- `Tests/ClawMailCoreTests/PendingApprovalWorkflowTests.swift`
+
+Key implementation files changed in this session:
+- `Sources/ClawMailCore/Models/PendingApproval.swift`
+- `Sources/ClawMailCore/Storage/MetadataIndex.swift`
+- `Sources/ClawMailCore/AccountOrchestrator.swift`
+- `Sources/ClawMailCore/IPC/IPCDispatcher.swift`
+- `Sources/ClawMailAppLib/Routes/RecipientsRoutes.swift`
+- `Sources/ClawMailCLI/Commands/RecipientsCommands.swift`
+- `Sources/ClawMailApp/Settings/GuardrailsTab.swift`
+
+Next issue to start with:
+- Recheck the remaining lower-level observations:
+  - calendar/contact/task update-delete paths that still brute-force fetch large remote collections
+  - settings/UI save paths that still swallow failures with `try?`
+  - README/security claim audit after the March 6 fixes
+
 ## Session Update (March 6, 2026, latest)
 
 This handoff now reflects fixes for issues 1-10. Issues 9-10 were completed after the earlier March 6 update below and verified with a full test pass.

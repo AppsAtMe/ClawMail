@@ -75,7 +75,9 @@ public actor IPCDispatcher {
 
         // Approved recipients
         case "recipients.list": return try await handleRecipientsList(params)
+        case "recipients.pending": return try await handleRecipientsPending(params)
         case "recipients.approve": return try await handleRecipientsApprove(params)
+        case "recipients.reject": return try await handleRecipientsReject(params)
         case "recipients.remove": return try await handleRecipientsRemove(params)
 
         default:
@@ -454,14 +456,42 @@ public actor IPCDispatcher {
         return .array(arr)
     }
 
+    private func handleRecipientsPending(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+        let account = optionalString(params, "account")
+        let approvals = try await orchestrator.listPendingApprovals(account: account)
+        let arr: [AnyCodableValue] = approvals.map { approval in
+            .dictionary([
+                "requestId": .string(approval.requestId),
+                "account": .string(approval.accountLabel),
+                "emails": .array(approval.emails.map { .string($0) }),
+                "createdAt": .string(ISO8601DateFormatter().string(from: approval.createdAt)),
+                "status": .string(approval.status.rawValue),
+                "operation": .string(approval.operation.rawValue),
+                "subject": approval.subject.map(AnyCodableValue.string) ?? .null,
+            ])
+        }
+        return .array(arr)
+    }
+
     private func handleRecipientsApprove(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
-        if case .array(let emails) = params["emails"] {
+        if case .string(let requestId) = params["requestId"] {
+            try await orchestrator.approvePendingApproval(requestId: requestId, account: account)
+        } else if case .array(let emails) = params["emails"] {
             let emailStrings = emails.compactMap { if case .string(let s) = $0 { return s } else { return nil as String? } }
             try await orchestrator.approvePendingRecipients(emails: emailStrings, account: account)
         } else if case .string(let email) = params["email"] {
             try await orchestrator.approveRecipient(email: email, account: account)
+        } else {
+            throw ClawMailError.invalidParameter("Missing required parameter: requestId, email, or emails")
         }
+        return .dictionary(["success": .bool(true)])
+    }
+
+    private func handleRecipientsReject(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+        let account = try requireString(params, "account")
+        let requestId = try requireString(params, "requestId")
+        try await orchestrator.rejectPendingApproval(requestId: requestId, account: account)
         return .dictionary(["success": .bool(true)])
     }
 

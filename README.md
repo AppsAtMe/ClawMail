@@ -126,6 +126,8 @@ clawmail contacts list --account=personal --query="Alice" # search contacts
 clawmail tasks create --account=work \
   --task-list=default --title="Review PR" --due=2026-03-10
 clawmail recipients list                                 # approved recipients
+clawmail recipients pending                              # held sends awaiting approval
+clawmail recipients approve --account=work --request-id=<id> # release held send
 clawmail audit list --account=work --limit=20            # audit log
 ```
 

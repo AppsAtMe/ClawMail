@@ -21,6 +21,7 @@ struct GuardrailsTab: View {
     @State private var firstTimeApproval = false
 
     @State private var approvedRecipients: [ApprovedRecipient] = []
+    @State private var pendingApprovals: [PendingApproval] = []
 
     var body: some View {
         Form {
@@ -94,7 +95,7 @@ struct GuardrailsTab: View {
             // First-time Recipient Approval
             Section("First-time Recipient Approval") {
                 Toggle("Require approval before sending to new recipients", isOn: $firstTimeApproval)
-                if firstTimeApproval && !approvedRecipients.isEmpty {
+                if !approvedRecipients.isEmpty {
                     Text("Approved Recipients:")
                         .font(.headline)
                     ForEach(approvedRecipients) { recipient in
@@ -114,6 +115,36 @@ struct GuardrailsTab: View {
                             }) {
                                 Image(systemName: "trash")
                                     .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+
+                if !pendingApprovals.isEmpty {
+                    Text("Held Sends:")
+                        .font(.headline)
+                    ForEach(pendingApprovals) { approval in
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(approval.subject ?? approval.operation.rawValue.capitalized)
+                                Text(approval.accountLabel)
+                                    .foregroundStyle(.secondary)
+                                    .font(.caption)
+                                Text(approval.emails.joined(separator: ", "))
+                                    .foregroundStyle(.secondary)
+                                    .font(.caption)
+                            }
+                            Spacer()
+                            Text(approval.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
+                            Button("Approve") {
+                                approvePendingApproval(approval)
+                            }
+                            .buttonStyle(.borderless)
+                            Button("Reject") {
+                                rejectPendingApproval(approval)
                             }
                             .buttonStyle(.borderless)
                         }
@@ -157,16 +188,7 @@ struct GuardrailsTab: View {
 
         firstTimeApproval = guardrails.firstTimeRecipientApproval
 
-        // Load approved recipients
-        if let orchestrator = appState.orchestrator {
-            Task {
-                if let recipients = try? await orchestrator.listApprovedRecipients() {
-                    await MainActor.run {
-                        approvedRecipients = recipients
-                    }
-                }
-            }
-        }
+        loadApprovalState()
     }
 
     private func saveConfig() {
@@ -206,7 +228,45 @@ struct GuardrailsTab: View {
                 email: recipient.email,
                 account: recipient.accountLabel
             )
-            approvedRecipients.removeAll { $0.id == recipient.id }
+            loadApprovalState()
+        }
+    }
+
+    private func approvePendingApproval(_ approval: PendingApproval) {
+        Task {
+            try? await appState.orchestrator?.approvePendingApproval(
+                requestId: approval.requestId,
+                account: approval.accountLabel
+            )
+            loadApprovalState()
+        }
+    }
+
+    private func rejectPendingApproval(_ approval: PendingApproval) {
+        Task {
+            try? await appState.orchestrator?.rejectPendingApproval(
+                requestId: approval.requestId,
+                account: approval.accountLabel
+            )
+            loadApprovalState()
+        }
+    }
+
+    private func loadApprovalState() {
+        guard let orchestrator = appState.orchestrator else {
+            approvedRecipients = []
+            pendingApprovals = []
+            return
+        }
+
+        Task {
+            let recipients = (try? await orchestrator.listApprovedRecipients()) ?? []
+            let approvals = (try? await orchestrator.listPendingApprovals()) ?? []
+
+            await MainActor.run {
+                approvedRecipients = recipients
+                pendingApprovals = approvals
+            }
         }
     }
 }

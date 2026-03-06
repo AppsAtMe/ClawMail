@@ -27,6 +27,7 @@ private final class GuardrailConfigRef: @unchecked Sendable {
 /// Central coordinator that manages all per-account resources and serves
 /// as the single entry point for agent interface layers.
 public actor AccountOrchestrator {
+    typealias PendingApprovalReplayHandler = @Sendable (PendingApprovalRequestEnvelope) async throws -> String
 
     // MARK: - Shared Resources
 
@@ -39,6 +40,7 @@ public actor AccountOrchestrator {
     private let credentialStore: CredentialStore
     private let saveConfig: @Sendable (AppConfig) throws -> Void
     private let syncScheduler = SyncScheduler()
+    private let pendingApprovalReplayHandler: PendingApprovalReplayHandler?
 
     // MARK: - Per-account state
 
@@ -65,12 +67,29 @@ public actor AccountOrchestrator {
         credentialStore: CredentialStore? = nil,
         configSaver: @escaping @Sendable (AppConfig) throws -> Void = { try $0.save() }
     ) throws {
+        try self.init(
+            config: config,
+            databaseManager: databaseManager,
+            credentialStore: credentialStore,
+            configSaver: configSaver,
+            pendingApprovalReplayHandler: nil
+        )
+    }
+
+    init(
+        config: AppConfig,
+        databaseManager: DatabaseManager,
+        credentialStore: CredentialStore? = nil,
+        configSaver: @escaping @Sendable (AppConfig) throws -> Void = { try $0.save() },
+        pendingApprovalReplayHandler: PendingApprovalReplayHandler?
+    ) throws {
         self.config = config
         self.databaseManager = databaseManager
         self.metadataIndex = MetadataIndex(db: databaseManager)
         self.auditLog = AuditLog(db: databaseManager)
         self.credentialStore = credentialStore ?? CredentialStore(keychainManager: KeychainManager())
         self.saveConfig = configSaver
+        self.pendingApprovalReplayHandler = pendingApprovalReplayHandler
         // Use a reference-type box so the closure always reads the live config value.
         // Capturing a struct directly would freeze guardrail settings at startup.
         let ref = GuardrailConfigRef(config.guardrails)
@@ -83,9 +102,22 @@ public actor AccountOrchestrator {
     }
 
     /// Apply updated guardrail settings immediately without restarting the daemon.
-    public func updateGuardrailConfig(_ guardrails: GuardrailConfig) {
+    public func updateGuardrailConfig(_ guardrails: GuardrailConfig) async {
+        let approvalWasEnabled = guardrailConfigRef.value.firstTimeRecipientApproval
         config.guardrails = guardrails
         guardrailConfigRef.value = guardrails
+
+        guard approvalWasEnabled, !guardrails.firstTimeRecipientApproval else {
+            return
+        }
+
+        for account in config.accounts.map(\.label) {
+            do {
+                try await releaseReadyPendingApprovals(account: account)
+            } catch {
+                onError?(account, "Failed to release pending approvals: \(error)")
+            }
+        }
     }
 
     public func updateSyncSettings(
@@ -214,7 +246,11 @@ public actor AccountOrchestrator {
 
         try await enforceGuardrails(
             account: request.account,
-            recipients: request.to + (request.cc ?? []) + (request.bcc ?? [])
+            recipients: request.to + (request.cc ?? []) + (request.bcc ?? []),
+            heldRequest: PendingApprovalRequestEnvelope(
+                interface: interface,
+                payload: .send(request)
+            )
         )
 
         let messageId = try await mgr.sendMessage(request)
@@ -242,7 +278,14 @@ public actor AccountOrchestrator {
         if request.replyAll {
             recipients += original.to + original.cc
         }
-        try await enforceGuardrails(account: request.account, recipients: recipients)
+        try await enforceGuardrails(
+            account: request.account,
+            recipients: recipients,
+            heldRequest: PendingApprovalRequestEnvelope(
+                interface: interface,
+                payload: .reply(request)
+            )
+        )
 
         let messageId = try await mgr.replyToMessage(request)
 
@@ -263,7 +306,14 @@ public actor AccountOrchestrator {
     public func forwardMessage(_ request: ForwardEmailRequest, interface: AgentInterface = .cli) async throws -> String {
         let mgr = try emailManager(for: request.account)
 
-        try await enforceGuardrails(account: request.account, recipients: request.to)
+        try await enforceGuardrails(
+            account: request.account,
+            recipients: request.to,
+            heldRequest: PendingApprovalRequestEnvelope(
+                interface: interface,
+                payload: .forward(request)
+            )
+        )
 
         let messageId = try await mgr.forwardMessage(
             messageId: request.originalMessageId,
@@ -542,28 +592,67 @@ public actor AccountOrchestrator {
         try metadataIndex.listApprovedRecipients(account: account)
     }
 
-    public func approveRecipient(email: String, account: String) throws {
+    public func listPendingApprovals(account: String? = nil) throws -> [PendingApproval] {
+        try metadataIndex.listPendingApprovals(account: account)
+    }
+
+    public func approveRecipient(email: String, account: String) async throws {
         try metadataIndex.approveRecipient(email: email, account: account)
+        try await releaseReadyPendingApprovals(account: account)
     }
 
     public func removeApprovedRecipient(email: String, account: String) throws {
         try metadataIndex.removeApprovedRecipient(email: email, account: account)
     }
 
-    public func approvePendingRecipients(emails: [String], account: String) throws {
+    public func approvePendingRecipients(emails: [String], account: String) async throws {
         for email in emails {
             try metadataIndex.approveRecipient(email: email, account: account)
+        }
+        try await releaseReadyPendingApprovals(account: account)
+    }
+
+    public func approvePendingApproval(requestId: String, account: String) async throws {
+        guard let approval = try metadataIndex.listPendingApprovals(account: account)
+            .first(where: { $0.requestId == requestId }) else {
+            throw ClawMailError.invalidParameter("Pending approval '\(requestId)' not found for account '\(account)'")
+        }
+
+        for email in approval.emails {
+            try metadataIndex.approveRecipient(email: email, account: account)
+        }
+
+        try await releasePendingApproval(requestId: requestId, account: account)
+    }
+
+    public func rejectPendingApproval(requestId: String, account: String) throws {
+        let updated = try metadataIndex.updatePendingApprovalStatus(
+            requestId: requestId,
+            account: account,
+            from: .pending,
+            to: .rejected
+        )
+
+        guard updated > 0 else {
+            throw ClawMailError.invalidParameter("Pending approval '\(requestId)' not found for account '\(account)'")
         }
     }
 
     // MARK: - Internal Helpers
 
-    private func enforceGuardrails(account: String, recipients: [EmailAddress]) async throws {
+    private func enforceGuardrails(
+        account: String,
+        recipients: [EmailAddress],
+        heldRequest: PendingApprovalRequestEnvelope? = nil
+    ) async throws {
         let result = try await guardrailEngine.checkSend(account: account, recipients: recipients)
         switch result {
         case .allowed: break
         case .blocked(let error): throw error
         case .pendingApproval(let emails):
+            if let heldRequest {
+                try metadataIndex.queuePendingApproval(request: heldRequest, emails: emails)
+            }
             onPendingApproval?(account, emails)
             throw ClawMailError.recipientPendingApproval(emails: emails)
         }
@@ -697,6 +786,12 @@ public actor AccountOrchestrator {
             idleMonitor: idleMonitor,
             syncEngine: syncEngine
         )
+
+        do {
+            try await releaseReadyPendingApprovals(account: account.label)
+        } catch {
+            onError?(account.label, "Failed to release pending approvals: \(error)")
+        }
     }
 
     private func requireConnection(for account: String) throws -> AccountConnection {
@@ -805,6 +900,73 @@ public actor AccountOrchestrator {
 
         var seen = Set<String>()
         return normalized.filter { seen.insert($0).inserted }
+    }
+
+    private func releaseReadyPendingApprovals(account: String) async throws {
+        let approvals = try metadataIndex.listPendingApprovals(account: account)
+        for approval in approvals {
+            guard try isPendingApprovalReady(approval) else { continue }
+            try await releasePendingApproval(requestId: approval.requestId, account: account)
+        }
+    }
+
+    private func releasePendingApproval(requestId: String, account: String) async throws {
+        guard let request = try metadataIndex.pendingApprovalRequest(
+            requestId: requestId,
+            account: account,
+            status: .pending
+        ) else {
+            throw ClawMailError.invalidParameter("Pending approval '\(requestId)' not found for account '\(account)'")
+        }
+
+        let updated = try metadataIndex.updatePendingApprovalStatus(
+            requestId: requestId,
+            account: account,
+            from: .pending,
+            to: .approved
+        )
+
+        guard updated > 0 else { return }
+
+        do {
+            _ = try await replayPendingApproval(request)
+        } catch {
+            _ = try? metadataIndex.updatePendingApprovalStatus(
+                requestId: requestId,
+                account: account,
+                from: .approved,
+                to: .pending
+            )
+            throw error
+        }
+    }
+
+    private func isPendingApprovalReady(_ approval: PendingApproval) throws -> Bool {
+        if !guardrailConfigRef.value.firstTimeRecipientApproval {
+            return true
+        }
+
+        for email in approval.emails {
+            guard try metadataIndex.isRecipientApproved(email: email, account: approval.accountLabel) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func replayPendingApproval(_ request: PendingApprovalRequestEnvelope) async throws -> String {
+        if let pendingApprovalReplayHandler {
+            return try await pendingApprovalReplayHandler(request)
+        }
+
+        switch request.payload {
+        case .send(let sendRequest):
+            return try await sendMessage(sendRequest, interface: request.interface)
+        case .reply(let replyRequest):
+            return try await replyToMessage(replyRequest, interface: request.interface)
+        case .forward(let forwardRequest):
+            return try await forwardMessage(forwardRequest, interface: request.interface)
+        }
     }
 }
 

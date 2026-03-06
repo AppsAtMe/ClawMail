@@ -2,6 +2,15 @@ import Foundation
 import GRDB
 
 public final class MetadataIndex: Sendable {
+    struct PendingApprovalRecord: Sendable {
+        let rowID: Int64
+        let email: String
+        let accountLabel: String
+        let createdAt: Date
+        let status: PendingApprovalStatus
+        let request: PendingApprovalRequestEnvelope
+    }
+
     private let db: DatabaseManager
 
     public init(db: DatabaseManager) {
@@ -276,6 +285,161 @@ public final class MetadataIndex: Sendable {
         }
     }
 
+    // MARK: - Pending Approvals
+
+    func queuePendingApproval(
+        request: PendingApprovalRequestEnvelope,
+        emails: [String]
+    ) throws {
+        let uniqueEmails = Array(Set(emails)).sorted()
+        guard !uniqueEmails.isEmpty else { return }
+
+        let requestJSON = try Self.encodePendingApprovalRequest(request)
+
+        try db.write { db in
+            for email in uniqueEmails {
+                let existing = try Int.fetchOne(
+                    db,
+                    sql: """
+                        SELECT COUNT(*) FROM pending_approvals
+                        WHERE email = ? AND account_label = ? AND send_request_json = ? AND status = ?
+                    """,
+                    arguments: [
+                        email,
+                        request.accountLabel,
+                        requestJSON,
+                        PendingApprovalStatus.pending.rawValue,
+                    ]
+                ) ?? 0
+
+                guard existing == 0 else { continue }
+
+                try db.execute(
+                    sql: """
+                        INSERT INTO pending_approvals (email, account_label, send_request_json, status)
+                        VALUES (?, ?, ?, ?)
+                    """,
+                    arguments: [
+                        email,
+                        request.accountLabel,
+                        requestJSON,
+                        PendingApprovalStatus.pending.rawValue,
+                    ]
+                )
+            }
+        }
+    }
+
+    public func listPendingApprovals(
+        account: String? = nil,
+        status: PendingApprovalStatus = .pending
+    ) throws -> [PendingApproval] {
+        let records = try pendingApprovalRecords(account: account, status: status)
+        let grouped = Dictionary(grouping: records, by: \.request.requestId)
+
+        return grouped.values.compactMap { records in
+            guard let first = records.first else { return nil }
+            return PendingApproval(
+                requestId: first.request.requestId,
+                accountLabel: first.accountLabel,
+                emails: records.map(\.email).sorted(),
+                createdAt: records.map(\.createdAt).min() ?? first.createdAt,
+                status: first.status,
+                operation: first.request.operation,
+                subject: first.request.subject
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.createdAt == rhs.createdAt {
+                return lhs.requestId < rhs.requestId
+            }
+            return lhs.createdAt > rhs.createdAt
+        }
+    }
+
+    func pendingApprovalRecords(
+        account: String? = nil,
+        status: PendingApprovalStatus? = .pending
+    ) throws -> [PendingApprovalRecord] {
+        try db.read { db in
+            var sql = """
+                SELECT id, email, account_label, send_request_json, created_at, status
+                FROM pending_approvals
+            """
+            var conditions: [String] = []
+            var args: StatementArguments = []
+
+            if let account {
+                conditions.append("account_label = ?")
+                args += [account]
+            }
+
+            if let status {
+                conditions.append("status = ?")
+                args += [status.rawValue]
+            }
+
+            if !conditions.isEmpty {
+                sql += " WHERE " + conditions.joined(separator: " AND ")
+            }
+
+            sql += " ORDER BY created_at DESC, id DESC"
+
+            let rows = try Row.fetchAll(db, sql: sql, arguments: args)
+            return try rows.map { row in
+                let statusRaw: String = row["status"]
+                let rowStatus = PendingApprovalStatus(rawValue: statusRaw) ?? .pending
+                let requestJSON: String = row["send_request_json"]
+
+                return PendingApprovalRecord(
+                    rowID: row["id"],
+                    email: row["email"],
+                    accountLabel: row["account_label"],
+                    createdAt: row["created_at"],
+                    status: rowStatus,
+                    request: try Self.decodePendingApprovalRequest(from: requestJSON)
+                )
+            }
+        }
+    }
+
+    func pendingApprovalRequest(
+        requestId: String,
+        account: String,
+        status: PendingApprovalStatus? = .pending
+    ) throws -> PendingApprovalRequestEnvelope? {
+        try pendingApprovalRecords(account: account, status: status)
+            .first { $0.request.requestId == requestId }?
+            .request
+    }
+
+    @discardableResult
+    func updatePendingApprovalStatus(
+        requestId: String,
+        account: String,
+        from currentStatus: PendingApprovalStatus? = nil,
+        to newStatus: PendingApprovalStatus
+    ) throws -> Int {
+        let recordIDs = try pendingApprovalRecords(account: account, status: currentStatus)
+            .filter { $0.request.requestId == requestId }
+            .map(\.rowID)
+
+        guard !recordIDs.isEmpty else { return 0 }
+
+        return try db.write { db in
+            let placeholders = Self.sqlPlaceholders(count: recordIDs.count)
+            var args: StatementArguments = [newStatus.rawValue]
+            for recordID in recordIDs {
+                args += [recordID]
+            }
+            try db.execute(
+                sql: "UPDATE pending_approvals SET status = ? WHERE id IN (\(placeholders))",
+                arguments: args
+            )
+            return Int(db.changesCount)
+        }
+    }
+
     // MARK: - Cleanup
 
     public func purgeAccount(label: String) throws {
@@ -331,5 +495,22 @@ public final class MetadataIndex: Sendable {
             hasAttachments: row["has_attachments"],
             uid: (row["uid"] as Int64?).map { UInt32($0) }
         )
+    }
+
+    private static func encodePendingApprovalRequest(_ request: PendingApprovalRequestEnvelope) throws -> String {
+        let data = try JSONEncoder().encode(request)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw ClawMailError.serverError("Failed to serialize pending approval request")
+        }
+        return json
+    }
+
+    private static func decodePendingApprovalRequest(from json: String) throws -> PendingApprovalRequestEnvelope {
+        let data = Data(json.utf8)
+        return try JSONDecoder().decode(PendingApprovalRequestEnvelope.self, from: data)
+    }
+
+    private static func sqlPlaceholders(count: Int) -> String {
+        Array(repeating: "?", count: count).joined(separator: ", ")
     }
 }

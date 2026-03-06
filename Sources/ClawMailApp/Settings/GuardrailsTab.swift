@@ -176,6 +176,9 @@ struct GuardrailsTab: View {
         config.guardrails.firstTimeRecipientApproval = firstTimeApproval
         appState.config = config
         try? config.save()
+        // Push new guardrail rules into the running engine immediately.
+        let guardrails = config.guardrails
+        Task { await appState.orchestrator?.updateGuardrailConfig(guardrails) }
     }
 
     private func addAllowDomain() {

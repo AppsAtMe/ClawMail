@@ -115,12 +115,15 @@ public final class IPCClient: @unchecked Sendable {
         let request = JSONRPCRequest(id: id, method: method, params: params)
         let data = try encodeJSONRPC(request)
 
-        var buffer = channel.allocator.buffer(capacity: data.count)
-        buffer.writeBytes(data)
-        try await channel.writeAndFlush(buffer)
-
-        // Wait for response with matching id
-        return try await responseHandler.waitForResponse(id: id)
+        // Register the continuation BEFORE writing to the channel. If the bytes were sent
+        // first, a fast server could reply before the continuation is registered and the
+        // response would be silently discarded, hanging the caller forever.
+        return try await withCheckedThrowingContinuation { continuation in
+            responseHandler.register(id: id, continuation: continuation)
+            var buffer = channel.allocator.buffer(capacity: data.count)
+            buffer.writeBytes(data)
+            channel.writeAndFlush(buffer, promise: nil)
+        }
     }
 
     /// Convenience for sending a request and extracting the result or throwing on error.
@@ -185,12 +188,11 @@ final class IPCClientHandler: ChannelInboundHandler, @unchecked Sendable {
         }
     }
 
-    /// Wait for a response with the given request id.
-    func waitForResponse(id: JSONRPCId) async throws -> JSONRPCResponse {
-        try await withCheckedThrowingContinuation { continuation in
-            lock.lock()
-            pendingResponses[id] = continuation
-            lock.unlock()
-        }
+    /// Register a continuation synchronously. Must be called before the request is sent
+    /// to avoid a race where the response arrives before the continuation is registered.
+    func register(id: JSONRPCId, continuation: CheckedContinuation<JSONRPCResponse, Error>) {
+        lock.lock()
+        pendingResponses[id] = continuation
+        lock.unlock()
     }
 }

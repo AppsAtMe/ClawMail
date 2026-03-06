@@ -113,8 +113,15 @@ struct OAuthFlowView: View {
                 let (_, redirectURI) = try await server.start()
 
                 // 3. Build authorization URL with the actual redirect URI
-                let oauthManager = OAuth2Manager(keychainManager: KeychainManager())
-                let config = OAuthHelpers.oauthConfig(for: provider, appConfig: appState.config, redirectURI: redirectURI)
+                let km = KeychainManager()
+                let secret = await km.getOAuthClientSecret(for: provider)
+                let oauthManager = OAuth2Manager(keychainManager: km)
+                let config = OAuthHelpers.oauthConfig(
+                    for: provider,
+                    appConfig: appState.config,
+                    clientSecret: secret,
+                    redirectURI: redirectURI
+                )
                 await oauthManager.setConfig(config, for: provider)
 
                 let authURL = try await oauthManager.buildAuthorizationURL(provider: provider, state: state)

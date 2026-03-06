@@ -10,6 +10,20 @@ public struct AccountConnection: Sendable {
     public let syncEngine: SyncEngine
 }
 
+/// Thread-safe mutable box used to pass live GuardrailConfig into the
+/// GuardrailEngine closure without violating Swift 6 init rules.
+private final class GuardrailConfigRef: @unchecked Sendable {
+    private var _value: GuardrailConfig
+    private let lock = NSLock()
+
+    init(_ value: GuardrailConfig) { _value = value }
+
+    var value: GuardrailConfig {
+        get { lock.withLock { _value } }
+        set { lock.withLock { _value = newValue } }
+    }
+}
+
 /// Central coordinator that manages all per-account resources and serves
 /// as the single entry point for agent interface layers.
 public actor AccountOrchestrator {
@@ -21,6 +35,7 @@ public actor AccountOrchestrator {
     private let metadataIndex: MetadataIndex
     private let auditLog: AuditLog
     private let guardrailEngine: GuardrailEngine
+    private let guardrailConfigRef: GuardrailConfigRef
     private let credentialStore: CredentialStore
     private let syncScheduler = SyncScheduler()
 
@@ -48,13 +63,22 @@ public actor AccountOrchestrator {
         self.databaseManager = databaseManager
         self.metadataIndex = MetadataIndex(db: databaseManager)
         self.auditLog = AuditLog(db: databaseManager)
-        let guardrails = config.guardrails
+        self.credentialStore = CredentialStore(keychainManager: KeychainManager())
+        // Use a reference-type box so the closure always reads the live config value.
+        // Capturing a struct directly would freeze guardrail settings at startup.
+        let ref = GuardrailConfigRef(config.guardrails)
+        self.guardrailConfigRef = ref
         self.guardrailEngine = GuardrailEngine(
-            config: { guardrails },
+            config: { ref.value },
             auditLog: auditLog,
             metadataIndex: metadataIndex
         )
-        self.credentialStore = CredentialStore(keychainManager: KeychainManager())
+    }
+
+    /// Apply updated guardrail settings immediately without restarting the daemon.
+    public func updateGuardrailConfig(_ guardrails: GuardrailConfig) {
+        config.guardrails = guardrails
+        guardrailConfigRef.value = guardrails
     }
 
     /// Set all notification callbacks at once.

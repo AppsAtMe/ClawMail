@@ -14,13 +14,12 @@ public actor APIServer {
 
     private let orchestrator: AccountOrchestrator
     private let port: Int
-    private let apiKey: String?
     private var runTask: Task<Void, any Error>?
 
     public init(orchestrator: AccountOrchestrator, port: Int = 24601, apiKey: String? = nil) {
+        precondition(apiKey != nil, "APIServer requires a non-nil apiKey")
         self.orchestrator = orchestrator
         self.port = port
-        self.apiKey = apiKey
     }
 
     // MARK: - Lifecycle
@@ -55,12 +54,8 @@ public actor APIServer {
     private func buildRouter() -> Router<BasicRequestContext> {
         let router = Router()
 
-        // Auth middleware reads from Keychain on each request for hot-reload support
-        guard apiKey != nil else {
-            // This is a programming error — APIServer should always have an API key.
-            // Using fatalError instead of preconditionFailure so it also fires in release builds.
-            fatalError("APIServer requires a non-nil apiKey")
-        }
+        // Auth middleware reads from Keychain on each request for hot-reload support.
+        // Nil apiKey is already caught by the precondition in init.
         router.middlewares.add(RateLimitMiddleware())
         router.middlewares.add(AuthMiddleware(keychainManager: KeychainManager()))
 
@@ -229,6 +224,9 @@ func intQueryParam(_ params: Parameters, _ name: String, default defaultValue: I
     // Cap pagination limits to prevent excessive query results
     if name == "limit" {
         return min(max(value, 1), maxResultLimit)
+    }
+    if name == "offset" {
+        return max(value, 0)
     }
     return value
 }

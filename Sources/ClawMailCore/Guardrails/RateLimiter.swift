@@ -10,35 +10,33 @@ public actor RateLimiter {
     public func checkSendAllowed(account: String, config: RateLimitConfig) throws -> Result<Void, ClawMailError> {
         let now = Date()
 
-        // Check per-minute limit
         if let maxPerMinute = config.maxPerMinute {
-            let since = now.addingTimeInterval(-60)
-            let count = try auditLog.countSends(account: account, since: since)
-            if count >= maxPerMinute {
-                return .failure(.rateLimitExceeded(retryAfterSeconds: 60))
-            }
+            let result = try checkWindow(account: account, windowSeconds: 60, limit: maxPerMinute, now: now)
+            if case .failure = result { return result }
         }
-
-        // Check per-hour limit
         if let maxPerHour = config.maxPerHour {
-            let since = now.addingTimeInterval(-3600)
-            let count = try auditLog.countSends(account: account, since: since)
-            if count >= maxPerHour {
-                let secondsUntilReset = 3600 - Int(now.timeIntervalSince(since))
-                return .failure(.rateLimitExceeded(retryAfterSeconds: max(secondsUntilReset, 60)))
-            }
+            let result = try checkWindow(account: account, windowSeconds: 3600, limit: maxPerHour, now: now)
+            if case .failure = result { return result }
         }
-
-        // Check per-day limit
         if let maxPerDay = config.maxPerDay {
-            let since = now.addingTimeInterval(-86400)
-            let count = try auditLog.countSends(account: account, since: since)
-            if count >= maxPerDay {
-                let secondsUntilReset = 86400 - Int(now.timeIntervalSince(since))
-                return .failure(.rateLimitExceeded(retryAfterSeconds: max(secondsUntilReset, 60)))
-            }
+            let result = try checkWindow(account: account, windowSeconds: 86400, limit: maxPerDay, now: now)
+            if case .failure = result { return result }
         }
 
         return .success(())
+    }
+
+    private func checkWindow(
+        account: String,
+        windowSeconds: TimeInterval,
+        limit: Int,
+        now: Date
+    ) throws -> Result<Void, ClawMailError> {
+        let since = now.addingTimeInterval(-windowSeconds)
+        let count = try auditLog.countSends(account: account, since: since)
+        guard count >= limit else { return .success(()) }
+        let oldest = try auditLog.oldestSendTimestamp(account: account, since: since)
+        let resetAt = (oldest ?? since).addingTimeInterval(windowSeconds)
+        return .failure(.rateLimitExceeded(retryAfterSeconds: max(Int(resetAt.timeIntervalSince(now)), 60)))
     }
 }

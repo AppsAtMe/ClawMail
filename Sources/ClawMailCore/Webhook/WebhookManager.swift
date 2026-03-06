@@ -19,8 +19,16 @@ public actor WebhookManager {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
             return nil
         }
-        // Block requests to cloud metadata endpoints and loopback
-        let blockedHosts = ["169.254.169.254", "metadata.google.internal", "::1", "[::1]"]
+        // Block requests to cloud metadata endpoints and loopback addresses.
+        let blockedHosts = [
+            "169.254.169.254",          // AWS/GCP/Azure IMDS
+            "metadata.google.internal", // GCP metadata
+            "::1",                      // IPv6 loopback (URL.host strips brackets)
+            "[::1]",                    // IPv6 loopback (with brackets)
+            "127.0.0.1",                // IPv4 loopback
+            "localhost",                // loopback hostname
+            "0.0.0.0",                  // wildcard (routes to localhost on some stacks)
+        ]
         if let host = url.host?.lowercased(), blockedHosts.contains(host) {
             return nil
         }

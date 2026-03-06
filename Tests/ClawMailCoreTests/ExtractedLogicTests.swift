@@ -64,10 +64,16 @@ struct WebhookManagerTests {
         #expect(manager == nil)
     }
 
-    @Test func allowsLocalhostForDev() async {
-        // localhost is allowed (useful for development/testing webhook receivers)
-        let manager = WebhookManager(urlString: "http://localhost:8080/webhook")
-        #expect(manager != nil)
+    @Test func blocksLocalhostIPv4() async {
+        #expect(WebhookManager(urlString: "http://127.0.0.1:8080/webhook") == nil)
+    }
+
+    @Test func blocksLocalhostHostname() async {
+        #expect(WebhookManager(urlString: "http://localhost:8080/webhook") == nil)
+    }
+
+    @Test func blocksWildcardAddress() async {
+        #expect(WebhookManager(urlString: "http://0.0.0.0/webhook") == nil)
     }
 
     // MARK: Payload Encoding
@@ -147,11 +153,13 @@ struct OAuthHelpersTests {
     // MARK: oauthConfig
 
     @Test func oauthConfigForGoogleUsesCorrectEndpoints() {
-        let config = AppConfig(
-            oauthGoogleClientId: "google-id",
-            oauthGoogleClientSecret: "google-secret"
+        let config = AppConfig(oauthGoogleClientId: "google-id")
+        let oauth = OAuthHelpers.oauthConfig(
+            for: .google,
+            appConfig: config,
+            clientSecret: "google-secret",
+            redirectURI: "http://127.0.0.1:12345/oauth/callback"
         )
-        let oauth = OAuthHelpers.oauthConfig(for: .google, appConfig: config, redirectURI: "http://127.0.0.1:12345/oauth/callback")
 
         #expect(oauth.clientId == "google-id")
         #expect(oauth.clientSecret == "google-secret")
@@ -162,11 +170,13 @@ struct OAuthHelpersTests {
     }
 
     @Test func oauthConfigForMicrosoftUsesCorrectEndpoints() {
-        let config = AppConfig(
-            oauthMicrosoftClientId: "ms-id",
-            oauthMicrosoftClientSecret: "ms-secret"
+        let config = AppConfig(oauthMicrosoftClientId: "ms-id")
+        let oauth = OAuthHelpers.oauthConfig(
+            for: .microsoft,
+            appConfig: config,
+            clientSecret: "ms-secret",
+            redirectURI: "http://127.0.0.1:54321/oauth/callback"
         )
-        let oauth = OAuthHelpers.oauthConfig(for: .microsoft, appConfig: config, redirectURI: "http://127.0.0.1:54321/oauth/callback")
 
         #expect(oauth.clientId == "ms-id")
         #expect(oauth.clientSecret == "ms-secret")
@@ -178,7 +188,7 @@ struct OAuthHelpersTests {
 
     @Test func oauthConfigDefaultsToEmptyClientId() {
         let config = AppConfig() // no OAuth fields set
-        let oauth = OAuthHelpers.oauthConfig(for: .google, appConfig: config, redirectURI: "http://127.0.0.1:0/cb")
+        let oauth = OAuthHelpers.oauthConfig(for: .google, appConfig: config, clientSecret: nil, redirectURI: "http://127.0.0.1:0/cb")
         #expect(oauth.clientId == "")
     }
 

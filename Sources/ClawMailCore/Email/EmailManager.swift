@@ -88,13 +88,10 @@ public actor EmailManager {
     // MARK: - Read Message
 
     public func readMessage(id: String) async throws -> EmailMessage {
+        let (folder, uid) = try resolvedUidAndFolder(id)
         guard let summary = try metadataIndex.getMessage(id: id, account: account.label) else {
             throw ClawMailError.messageNotFound(id)
         }
-        guard let uid = summary.uid ?? UInt32(id.components(separatedBy: "/").last ?? "") else {
-            throw ClawMailError.messageNotFound(id)
-        }
-        let folder = summary.folder
         let body = try await imapClient.fetchMessageBody(folder: folder, uid: uid)
 
         let parts = MIMEParser.parseMIME(body.rawData)
@@ -253,7 +250,7 @@ public actor EmailManager {
 
         // Forward original attachments
         if !original.attachments.isEmpty {
-            let (_, uid) = try resolveMessageUid(messageId)
+            let (_, uid) = try resolvedUidAndFolder(messageId)
             for att in original.attachments {
                 let section = att.section ?? "1"
                 let data = try await imapClient.fetchAttachment(
@@ -283,7 +280,7 @@ public actor EmailManager {
     // MARK: - Move / Delete / Flags
 
     public func moveMessage(id: String, to destination: String) async throws {
-        let (folder, uid) = try resolveMessageUid(id)
+        let (folder, uid) = try resolvedUidAndFolder(id)
         try await imapClient.moveMessage(uid: uid, from: folder, to: destination)
 
         if var summary = try metadataIndex.getMessage(id: id, account: account.label) {
@@ -294,14 +291,14 @@ public actor EmailManager {
     }
 
     public func deleteMessage(id: String, permanent: Bool = false) async throws {
-        let (folder, uid) = try resolveMessageUid(id)
+        let (folder, uid) = try resolvedUidAndFolder(id)
         try await imapClient.deleteMessage(uid: uid, folder: folder, permanent: permanent)
         try metadataIndex.deleteMessage(id: id, account: account.label)
     }
 
     @discardableResult
     public func updateFlags(id: String, add: [EmailFlag] = [], remove: [EmailFlag] = []) async throws -> EmailSummary {
-        let (folder, uid) = try resolveMessageUid(id)
+        let (folder, uid) = try resolvedUidAndFolder(id)
         try await imapClient.updateFlags(uid: uid, folder: folder, add: add, remove: remove)
 
         if var summary = try metadataIndex.getMessage(id: id, account: account.label) {
@@ -450,7 +447,7 @@ public actor EmailManager {
         let url = try Self.validateDestinationPath(destinationPath)
 
         let original = try await readMessage(id: messageId)
-        let (_, uid) = try resolveMessageUid(messageId)
+        let (_, uid) = try resolvedUidAndFolder(messageId)
 
         guard let att = original.attachments.first(where: { $0.filename == filename }) else {
             throw ClawMailError.messageNotFound("Attachment '\(filename)' not found")
@@ -509,11 +506,11 @@ public actor EmailManager {
 
     // MARK: - Helpers
 
-    private func resolveMessageUid(_ id: String) throws -> (folder: String, uid: UInt32) {
+    private func resolvedUidAndFolder(_ id: String) throws -> (folder: String, uid: UInt32) {
         guard let summary = try metadataIndex.getMessage(id: id, account: account.label) else {
             throw ClawMailError.messageNotFound(id)
         }
-        guard let uid = UInt32(id.components(separatedBy: "/").last ?? "") else {
+        guard let uid = summary.uid ?? UInt32(id.components(separatedBy: "/").last ?? "") else {
             throw ClawMailError.messageNotFound(id)
         }
         return (summary.folder, uid)

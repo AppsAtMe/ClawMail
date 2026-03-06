@@ -146,8 +146,14 @@ struct APITab: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(minWidth: 280)
                         .onChange(of: googleClientSecret) { _, newValue in
-                            appState.config.oauthGoogleClientSecret = newValue.isEmpty ? nil : newValue
-                            try? appState.config.save()
+                            Task {
+                                let km = KeychainManager()
+                                if newValue.isEmpty {
+                                    try? await km.deleteOAuthClientSecret(for: .google)
+                                } else {
+                                    try? await km.saveOAuthClientSecret(newValue, for: .google)
+                                }
+                            }
                         }
                 }
 
@@ -166,8 +172,14 @@ struct APITab: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(minWidth: 280)
                         .onChange(of: microsoftClientSecret) { _, newValue in
-                            appState.config.oauthMicrosoftClientSecret = newValue.isEmpty ? nil : newValue
-                            try? appState.config.save()
+                            Task {
+                                let km = KeychainManager()
+                                if newValue.isEmpty {
+                                    try? await km.deleteOAuthClientSecret(for: .microsoft)
+                                } else {
+                                    try? await km.saveOAuthClientSecret(newValue, for: .microsoft)
+                                }
+                            }
                         }
                 }
             }
@@ -193,13 +205,17 @@ struct APITab: View {
         port = String(appState.config.restApiPort)
         webhookURL = appState.config.webhookURL ?? ""
         googleClientId = appState.config.oauthGoogleClientId ?? ""
-        googleClientSecret = appState.config.oauthGoogleClientSecret ?? ""
         microsoftClientId = appState.config.oauthMicrosoftClientId ?? ""
-        microsoftClientSecret = appState.config.oauthMicrosoftClientSecret ?? ""
         Task {
             let km = KeychainManager()
-            if let key = await km.getAPIKey() {
-                await MainActor.run { apiKey = key }
+            async let apiKeyResult = km.getAPIKey()
+            async let googleResult = km.getOAuthClientSecret(for: .google)
+            async let microsoftResult = km.getOAuthClientSecret(for: .microsoft)
+            let (apiKeyVal, googleVal, microsoftVal) = await (apiKeyResult, googleResult, microsoftResult)
+            await MainActor.run {
+                if let key = apiKeyVal { apiKey = key }
+                googleClientSecret = googleVal ?? ""
+                microsoftClientSecret = microsoftVal ?? ""
             }
         }
     }

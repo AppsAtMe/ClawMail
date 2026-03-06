@@ -479,12 +479,8 @@ public actor IMAPClient {
 
     private func loginAuthenticate(username: String, password: String) async throws {
         let tag = nextTag()
-        // Quote and escape username/password for the LOGIN command.
-        let escapedUser = username.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let escapedPass = password.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        try await sendRaw("\(tag) LOGIN \"\(escapedUser)\" \"\(escapedPass)\"\r\n")
+        // quoteIMAPString strips CR/LF and escapes \ and " per RFC 3501.
+        try await sendRaw("\(tag) LOGIN \(quoteIMAPString(username)) \(quoteIMAPString(password))\r\n")
         let response = try await readTaggedResponse(tag: tag)
         guard response.status == .ok else {
             throw ClawMailError.authFailed("LOGIN failed: \(response.text)")

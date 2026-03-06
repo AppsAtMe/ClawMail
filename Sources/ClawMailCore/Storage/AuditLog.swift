@@ -121,6 +121,20 @@ public final class AuditLog: Sendable {
         }
     }
 
+    /// Timestamp of the oldest successful send within the window (for accurate retry-after).
+    public func oldestSendTimestamp(account: String, since: Date) throws -> Date? {
+        try db.read { db in
+            try Date.fetchOne(
+                db,
+                sql: """
+                    SELECT MIN(timestamp) FROM audit_log
+                    WHERE account_label = ? AND operation = 'email.send' AND result = 'success' AND timestamp >= ?
+                """,
+                arguments: [account, since]
+            )
+        }
+    }
+
     // MARK: - Cleanup
 
     public func purgeOlderThan(days: Int) throws {

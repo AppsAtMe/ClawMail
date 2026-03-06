@@ -293,13 +293,20 @@ public final class MetadataIndex: Sendable {
         let flagStrings = try JSONDecoder().decode([String].self, from: flagsData)
         let flags = Set(flagStrings.compactMap { EmailFlag(rawValue: $0) })
 
+        let recipientsStr: String = row["recipients_json"] ?? "[]"
+        let recipientDicts = (try? JSONDecoder().decode([[String: String]].self, from: Data(recipientsStr.utf8))) ?? []
+        let toRecipients = recipientDicts.filter { $0["type"] == "to" }
+            .map { EmailAddress(name: $0["name"], email: $0["email"] ?? "") }
+        let ccRecipients = recipientDicts.filter { $0["type"] == "cc" }
+            .map { EmailAddress(name: $0["name"], email: $0["email"] ?? "") }
+
         return EmailSummary(
             id: row["id"],
             account: row["account_label"],
             folder: row["folder"],
             from: EmailAddress(name: row["sender_name"], email: row["sender_email"]),
-            to: [],  // Simplified — full recipients available via recipients_json if needed
-            cc: [],
+            to: toRecipients,
+            cc: ccRecipients,
             subject: row["subject"],
             date: row["date"],
             flags: flags,

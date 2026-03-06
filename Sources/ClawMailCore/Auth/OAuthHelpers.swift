@@ -24,13 +24,19 @@ public enum OAuthHelpers {
         return result == 0
     }
 
-    /// Build OAuthConfig for the given provider using AppConfig values and the actual redirect URI.
-    public static func oauthConfig(for provider: OAuthProvider, appConfig: AppConfig, redirectURI: String) -> OAuthConfig {
+    /// Build OAuthConfig. `clientSecret` is read from the Keychain by the caller and
+    /// passed in so this function stays synchronous and independently testable.
+    public static func oauthConfig(
+        for provider: OAuthProvider,
+        appConfig: AppConfig,
+        clientSecret: String?,
+        redirectURI: String
+    ) -> OAuthConfig {
         switch provider {
         case .google:
             return OAuthConfig(
                 clientId: appConfig.oauthGoogleClientId ?? "",
-                clientSecret: appConfig.oauthGoogleClientSecret,
+                clientSecret: clientSecret,
                 authorizationEndpoint: URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!,
                 tokenEndpoint: URL(string: "https://oauth2.googleapis.com/token")!,
                 scopes: [
@@ -43,7 +49,7 @@ public enum OAuthHelpers {
         case .microsoft:
             return OAuthConfig(
                 clientId: appConfig.oauthMicrosoftClientId ?? "",
-                clientSecret: appConfig.oauthMicrosoftClientSecret,
+                clientSecret: clientSecret,
                 authorizationEndpoint: URL(string: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize")!,
                 tokenEndpoint: URL(string: "https://login.microsoftonline.com/common/oauth2/v2.0/token")!,
                 scopes: [

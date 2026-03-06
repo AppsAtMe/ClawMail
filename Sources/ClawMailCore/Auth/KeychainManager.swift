@@ -68,6 +68,26 @@ public actor KeychainManager {
         return key
     }
 
+    // MARK: - OAuth Client Secrets
+
+    private static let googleSecretAccount = "clawmail-oauth-google-secret"
+    private static let microsoftSecretAccount = "clawmail-oauth-microsoft-secret"
+
+    public func saveOAuthClientSecret(_ secret: String, for provider: OAuthProvider) throws {
+        let key = provider == .google ? Self.googleSecretAccount : Self.microsoftSecretAccount
+        try keychain.set(secret, key: key)
+    }
+
+    public func getOAuthClientSecret(for provider: OAuthProvider) -> String? {
+        let key = provider == .google ? Self.googleSecretAccount : Self.microsoftSecretAccount
+        return try? keychain.get(key)
+    }
+
+    public func deleteOAuthClientSecret(for provider: OAuthProvider) throws {
+        let key = provider == .google ? Self.googleSecretAccount : Self.microsoftSecretAccount
+        try keychain.remove(key)
+    }
+
     // MARK: - Cleanup
 
     public func deleteAll(accountId: UUID) throws {

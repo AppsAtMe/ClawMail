@@ -809,7 +809,7 @@ The ClawMailApp runs as the daemon and listens on a Unix domain socket. The CLI 
 - Socket path: `~/Library/Application Support/ClawMail/clawmail.sock`
 - Listens for connections on the Unix domain socket
 - Each connection: read JSON-RPC 2.0 requests, dispatch to `AccountOrchestrator`, return JSON-RPC 2.0 responses
-- Only one client connection at a time (agent lock)
+- One long-lived agent session at a time (agent lock); concurrent CLI sessions remain allowed
 - JSON-RPC 2.0 method names mirror the operation names:
   - `email.list`, `email.read`, `email.send`, `email.reply`, `email.forward`
   - `email.move`, `email.delete`, `email.updateFlags`, `email.search`
@@ -861,12 +861,13 @@ The ClawMailApp runs as the daemon and listens on a Unix domain socket. The CLI 
   - `email` (with subcommands: list, read, send, reply, forward, move, delete, flag, search, folders, create-folder, delete-folder, download-attachment)
   - `calendar` (with subcommands: list, calendars, create, update, delete)
   - `contacts` (with subcommands: list, address-books, create, update, delete)
-  - `tasks` (with subcommands: list, task-lists, create, update, delete)
+- `tasks` (with subcommands: list, task-lists, create, update, delete)
   - `accounts` (with subcommands: list)
   - `audit` (with subcommands: list)
+  - `recipients` (with subcommands: list, pending, approve, reject, remove)
   - `status`
-  - `mcp` — launches the MCP stdio server (Phase 15)
-  - `daemon` — launches the daemon (used by LaunchAgent, Phase 17)
+
+MCP is implemented as a separate executable target (`ClawMailMCP` / `clawmail-mcp`) rather than a `clawmail mcp` subcommand.
 
 **`Sources/ClawMailCLI/Commands/EmailCommands.swift`**
 - Implementation of all email subcommands
@@ -1222,7 +1223,7 @@ The MCP server process is launched by the MCP client (e.g., Claude Code). It con
 **`Resources/com.clawmail.agent.plist`**
 - LaunchAgent plist as specified in the spec
 - Label: `com.clawmail.agent`
-- Program: `/usr/local/bin/clawmail daemon`
+- Program: `/Applications/ClawMail.app/Contents/MacOS/ClawMailApp`
 - RunAtLoad: true
 - KeepAlive: true
 
@@ -1231,10 +1232,7 @@ The MCP server process is launched by the MCP client (e.g., Claude Code). It con
   - On enable: copy plist to `~/Library/LaunchAgents/`, run `launchctl load`
   - On disable: run `launchctl unload`, remove plist
 
-**`clawmail daemon` command** (in CLI from Phase 14):
-- Starts the full ClawMail daemon (same as what the app does)
-- Used by LaunchAgent for background startup
-- If the app is already running, exits with a message
+Launch-at-login starts the app bundle executable directly instead of a CLI daemon subcommand.
 
 **Homebrew Cask formula** (create `HomebrewFormula/clawmail.rb` for reference):
 ```ruby
@@ -1248,11 +1246,11 @@ cask "clawmail" do
   homepage "https://github.com/<org>/ClawMail"
 
   app "ClawMail.app"
-  binary "#{appdir}/ClawMail.app/Contents/MacOS/clawmail"
+  binary "#{appdir}/ClawMail.app/Contents/MacOS/ClawMailCLI", target: "/usr/local/bin/clawmail"
+  binary "#{appdir}/ClawMail.app/Contents/MacOS/ClawMailMCP", target: "/usr/local/bin/clawmail-mcp"
 
   postflight do
-    # Symlink CLI to /usr/local/bin
-    system_command "ln", args: ["-sf", "#{appdir}/ClawMail.app/Contents/MacOS/ClawMailCLI", "/usr/local/bin/clawmail"]
+    # App installation is sufficient; binary stanzas expose the CLI tools
   end
 
   uninstall launchctl: "com.clawmail.agent",
@@ -1723,7 +1721,6 @@ Error: ClawMail daemon is not running.
 
 Start it with one of:
   - Open ClawMail.app from Applications
-  - Run: clawmail daemon
   - Enable Launch at Login in ClawMail Settings
 ```
 

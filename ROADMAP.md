@@ -29,5 +29,6 @@ These are explicitly listed in SPECIFICATION.md as "Future Considerations":
 ## Quality / Testing
 
 - [ ] **Integration test coverage** — Expand integration tests to cover CalDAV, CardDAV, and full search pipeline against Docker test servers.
-- [ ] **Security-focused test suite** — Unit tests for CRLF injection prevention, path traversal validation, FTS5 sanitization, and IPC handshake rejection.
+- [x] **Security-focused test suite** — Unit and regression coverage exists for CRLF injection prevention, path traversal validation, FTS5 sanitization, DAV same-origin / HTTPS enforcement, and IPC handshake behavior.
+- [x] **Settings failure-state coverage** — App tests cover both rendered and interaction-driven failure alerts for the API, Activity Log, General, and Guardrails settings flows.
 - [ ] **CI pipeline** — GitHub Actions workflow for build + test on macOS runners.

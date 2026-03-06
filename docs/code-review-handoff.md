@@ -4,6 +4,39 @@ Date: March 6, 2026
 Repository: `/Users/andrewrmitchell/Developer/ClawMail`
 Purpose: Carry forward a full review into a fresh session with enough context to fix issues without re-reading the entire repo.
 
+## Session Update (March 6, 2026, current latest)
+
+This handoff now reflects the follow-up documentation sync and the deeper settings interaction coverage added after the remaining low-risk cleanup work.
+
+Completed in this session:
+- Updated the handoff, README, specification, blueprint, and roadmap so they reflect the shipped MCP launch model, LaunchAgent target, recipient approval workflow, and current testing posture.
+- Added `docs/operations-reference.md` with a concise maintainer-focused reference for startup, shutdown, IPC/session behavior, approvals, and local files.
+- Added async `ViewInspector`-based app tests that drive real failure flows for API key regeneration, activity-log loading, guardrails approval-state loading, and launch-at-login updates.
+- Introduced a small `Inspection` test seam for the relevant settings tabs so hosted SwiftUI state changes can be inspected without affecting production behavior.
+
+Current build/test status after these fixes:
+- `swift test`: passed
+- Test suite reported 177 passing tests across 25 suites
+
+New tests added in this session:
+- `Tests/ClawMailAppTests/SettingsInteractionTests.swift`
+
+Key implementation files changed in this session:
+- `README.md`
+- `SPECIFICATION.md`
+- `BLUEPRINT.md`
+- `ROADMAP.md`
+- `docs/operations-reference.md`
+- `Sources/ClawMailApp/Inspection.swift`
+- `Sources/ClawMailApp/Settings/APITab.swift`
+- `Sources/ClawMailApp/Settings/ActivityLogTab.swift`
+- `Sources/ClawMailApp/Settings/GeneralTab.swift`
+- `Sources/ClawMailApp/Settings/GuardrailsTab.swift`
+
+Next issue to start with:
+- No confirmed findings remain from the March 6 review handoff.
+- If we want to keep investing in UI assurance, the next reasonable increment would be confirmation-driven Accounts-tab tests or broader end-to-end UI automation for multi-step settings flows.
+
 ## Session Update (March 6, 2026, previous latest)
 
 This handoff now reflects follow-up UI coverage for the settings error alerts that were added during the March 6 hardening sweep.

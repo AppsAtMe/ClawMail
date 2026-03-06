@@ -85,16 +85,18 @@ public final class IPCClient: @unchecked Sendable {
     /// server-side `channelInactive` fires before the process exits.
     public func disconnect() async {
         guard let ch = channel else {
-            try? await group.shutdownGracefully()
+            await shutdownEventLoop()
             return
         }
         channel = nil
         do {
-            try await ch.close().get()
+            try await ch.close()
+        } catch let error as ChannelError where error == .alreadyClosed || error == .ioOnClosedChannel {
+            // The daemon may have already closed the connection.
         } catch {
-            // Channel may already be closed by the server
+            Self.log("Failed to close IPC client channel cleanly: \(Self.describe(error))")
         }
-        try? await group.shutdownGracefully()
+        await shutdownEventLoop()
     }
 
     public var isConnected: Bool {
@@ -133,6 +135,31 @@ public final class IPCClient: @unchecked Sendable {
             throw ClawMailError.serverError("\(error.message) (code: \(error.code))")
         }
         return response.result ?? .null
+    }
+
+    private func shutdownEventLoop() async {
+        do {
+            try await group.shutdownGracefully()
+        } catch {
+            Self.log("Failed to shut down IPC client event loop: \(Self.describe(error))")
+        }
+    }
+
+    private static func log(_ message: String) {
+        let line = "[ClawMailIPC] \(message)\n"
+        FileHandle.standardError.write(Data(line.utf8))
+    }
+
+    private static func describe(_ error: Error) -> String {
+        if let clawMailError = error as? ClawMailError {
+            return clawMailError.message
+        }
+        if let localizedError = error as? LocalizedError,
+           let description = localizedError.errorDescription,
+           !description.isEmpty {
+            return description
+        }
+        return String(describing: error)
     }
 }
 

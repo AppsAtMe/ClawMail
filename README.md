@@ -68,6 +68,8 @@ Removes the app, symlinks, and LaunchAgent.
    - Send rate limits (per minute / hour / day)
    - Domain allowlist or blocklist
    - First-time recipient approval (requires human approval before sending to new addresses)
+   - Held sends can be reviewed in Settings > Guardrails, via `clawmail recipients ...`, or through the `/api/v1/recipients/*` REST routes
+   - If macOS notification permission is granted, ClawMail posts a local notification when a send is held for approval
 
 4. **Connect an agent** — see [Agent Interfaces](#agent-interfaces) below.
 
@@ -128,6 +130,8 @@ clawmail tasks create --account=work \
 clawmail recipients list                                 # approved recipients
 clawmail recipients pending                              # held sends awaiting approval
 clawmail recipients approve --account=work --request-id=<id> # release held send
+clawmail recipients reject --account=work --request-id=<id>  # reject held send
+clawmail recipients remove --account=work alice@example.com  # revoke approved recipient
 clawmail audit list --account=work --limit=20            # audit log
 ```
 
@@ -164,11 +168,21 @@ curl -X POST -H "Authorization: Bearer $API_KEY" \
 # Search
 curl -H "Authorization: Bearer $API_KEY" \
   "http://localhost:24601/api/v1/email/search?account=work&q=from:bob+invoice"
+
+# List held sends awaiting approval
+curl -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:24601/api/v1/recipients/pending?account=work"
+
+# Approve a held send by request ID
+curl -X POST -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"account":"work","requestId":"req-123"}' \
+  http://localhost:24601/api/v1/recipients/approve
 ```
 
 Rate limited to 120 requests/minute.
 
-**Endpoints**: `/email`, `/calendar`, `/contacts`, `/tasks`, `/accounts`, `/audit`, `/recipients`
+**Endpoints**: `/email`, `/calendar`, `/contacts`, `/tasks`, `/accounts`, `/audit`, `/recipients`, `/recipients/pending`, `/recipients/approve`, `/recipients/reject`
 
 ## Search Syntax
 
@@ -224,6 +238,10 @@ Set `webhookURL` in Settings > API to receive HTTP POST notifications when new m
   "timestamp": "2026-03-05T10:30:00Z"
 }
 ```
+
+### Local Approval Notifications
+
+When first-time recipient approval blocks a send, ClawMail requests macOS notification permission at launch and posts a local notification identifying the affected account and recipients. Delivery failures are non-fatal and logged to stderr.
 
 ## Data Locations
 
@@ -343,6 +361,8 @@ ClawMail/
 
 - [`SPECIFICATION.md`](SPECIFICATION.md) — Complete feature specification
 - [`BLUEPRINT.md`](BLUEPRINT.md) — Implementation blueprint with build phases
+- [`ROADMAP.md`](ROADMAP.md) — Remaining gaps, deferred features, and testing backlog
+- [`docs/operations-reference.md`](docs/operations-reference.md) — Runtime services, files, approvals, and operational behavior
 
 ## License
 

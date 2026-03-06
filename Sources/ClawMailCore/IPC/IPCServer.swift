@@ -144,7 +144,7 @@ public final class IPCServer: Sendable {
 
     public func start() async throws {
         // Remove stale socket file
-        try? FileManager.default.removeItem(atPath: socketPath)
+        try Self.removeItemIfPresent(atPath: socketPath)
 
         // Ensure the directory exists with owner-only access (0700).
         // This prevents other users from accessing the socket or token files.
@@ -186,11 +186,24 @@ public final class IPCServer: Sendable {
     public func stop() async {
         let ch = connections.serverChannel
         connections.serverChannel = nil
-        let noPromise: EventLoopPromise<Void>? = nil
-        ch?.close(mode: .all, promise: noPromise)
-        try? await group.shutdownGracefully()
-        try? FileManager.default.removeItem(atPath: socketPath)
-        try? FileManager.default.removeItem(atPath: tokenPath)
+        if let ch {
+            do {
+                try await ch.close(mode: .all)
+            } catch let error as ChannelError where error == .alreadyClosed || error == .ioOnClosedChannel {
+                // Another shutdown path may have already closed the channel.
+            } catch {
+                Self.log("Failed to close IPC server channel: \(Self.describe(error))")
+            }
+        }
+
+        do {
+            try await group.shutdownGracefully()
+        } catch {
+            Self.log("Failed to shut down IPC server event loop: \(Self.describe(error))")
+        }
+
+        Self.cleanupItem(atPath: socketPath, description: "IPC socket")
+        Self.cleanupItem(atPath: tokenPath, description: "IPC token file")
         ipcToken = nil
     }
 
@@ -219,6 +232,46 @@ public final class IPCServer: Sendable {
 
     var hasAgentConnection: Bool {
         connections.hasAgentConnection
+    }
+
+    private static func removeItemIfPresent(atPath path: String) throws {
+        do {
+            try FileManager.default.removeItem(atPath: path)
+        } catch {
+            guard !isMissingFileError(error) else { return }
+            throw error
+        }
+    }
+
+    private static func cleanupItem(atPath path: String, description: String) {
+        do {
+            try removeItemIfPresent(atPath: path)
+        } catch {
+            log("Failed to remove \(description) at \(path): \(describe(error))")
+        }
+    }
+
+    private static func isMissingFileError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return (nsError.domain == NSCocoaErrorDomain && nsError.code == CocoaError.fileNoSuchFile.rawValue) ||
+            (nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(POSIXErrorCode.ENOENT.rawValue))
+    }
+
+    private static func log(_ message: String) {
+        let line = "[ClawMailIPC] \(message)\n"
+        FileHandle.standardError.write(Data(line.utf8))
+    }
+
+    private static func describe(_ error: Error) -> String {
+        if let clawMailError = error as? ClawMailError {
+            return clawMailError.message
+        }
+        if let localizedError = error as? LocalizedError,
+           let description = localizedError.errorDescription,
+           !description.isEmpty {
+            return description
+        }
+        return String(describing: error)
     }
 }
 

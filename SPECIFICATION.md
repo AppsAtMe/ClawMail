@@ -74,7 +74,7 @@ ClawMail solves this by acting as a persistent, always-on bridge between AI agen
 
 ### Concurrency Model
 
-**Single agent connection at a time.** If an agent is connected via MCP and another attempts to connect, the second connection is rejected with a clear error message. The CLI and REST API share this same lock — all three interfaces compete for the single agent slot. This avoids race conditions and conflicting operations on the mailbox.
+**Single long-lived agent connection at a time.** If an agent is connected via MCP and another agent session attempts to connect, the second connection is rejected with a clear error message. CLI IPC sessions run concurrently, and REST requests are handled in-process by the app’s local API server. This keeps long-lived agent automation exclusive without blocking one-off local admin actions.
 
 The human UI (menu bar, settings window) is always accessible regardless of agent connection state.
 
@@ -86,15 +86,14 @@ ClawMail exposes three agent-facing interfaces. All three provide access to the 
 
 ### 1. MCP Server (Primary — stdio transport)
 
-The MCP (Model Context Protocol) server is the primary agent interface. It uses **stdio transport**, meaning the ClawMail app spawns a child process that communicates via stdin/stdout.
+The MCP (Model Context Protocol) server is the primary agent interface. It uses **stdio transport**, meaning the MCP client launches `clawmail-mcp` as a child process and communicates via stdin/stdout.
 
 **Configuration for Claude Code** (in `.mcp.json` or MCP settings):
 ```json
 {
   "mcpServers": {
     "clawmail": {
-      "command": "/usr/local/bin/clawmail",
-      "args": ["mcp"]
+      "command": "/usr/local/bin/clawmail-mcp"
     }
   }
 }
@@ -739,8 +738,7 @@ ClawMail registers as a **macOS Launch Agent** to start at login. It runs as a b
     <string>com.clawmail.agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/clawmail</string>
-        <string>daemon</string>
+        <string>/Applications/ClawMail.app/Contents/MacOS/ClawMailApp</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -1013,8 +1011,7 @@ After installation, add to the project or global `.mcp.json`:
 {
   "mcpServers": {
     "clawmail": {
-      "command": "/usr/local/bin/clawmail",
-      "args": ["mcp"]
+      "command": "/usr/local/bin/clawmail-mcp"
     }
   }
 }

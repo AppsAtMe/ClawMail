@@ -6,6 +6,7 @@ struct APITab: View {
     @Environment(AppState.self) private var environmentAppState
     private let appStateOverride: AppState?
     private let generateAPIKeyAction: @Sendable () async throws -> String
+    internal let inspection = Inspection<Self>()
 
     @State private var port: String = "24601"
     @State private var apiKey: String = ""
@@ -242,6 +243,7 @@ struct APITab: View {
         .formStyle(.grouped)
         .padding()
         .onAppear { loadState() }
+        .onReceive(inspection.notice) { inspection.visit(self, $0) }
         .alert("Operation Failed", isPresented: showingErrorAlert) {
             Button("OK", role: .cancel) {}
         } message: {

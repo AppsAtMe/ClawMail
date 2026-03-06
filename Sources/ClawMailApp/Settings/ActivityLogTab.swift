@@ -6,6 +6,7 @@ struct ActivityLogTab: View {
     @Environment(AppState.self) private var environmentAppState
     private let appStateOverride: AppState?
     private let loadEntriesAction: @MainActor (AppState, String?) async throws -> [AuditEntry]
+    internal let inspection = Inspection<Self>()
 
     @State private var entries: [AuditEntry] = []
     @State private var accountFilter: String?
@@ -94,6 +95,7 @@ struct ActivityLogTab: View {
             }
         }
         .onAppear { loadEntries() }
+        .onReceive(inspection.notice) { inspection.visit(self, $0) }
         .onReceive(refreshTimer) { _ in
             if autoRefresh { loadEntries() }
         }

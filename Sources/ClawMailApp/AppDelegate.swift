@@ -95,22 +95,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
 
             // Request notification permission (no-op if already granted)
-            let _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+            await Self.requestNotificationAuthorization()
 
             // Wire pending approval → macOS notification
             await orchestrator.setPendingApprovalCallback { accountLabel, emails in
                 Task {
-                    let center = UNUserNotificationCenter.current()
-                    let content = UNMutableNotificationContent()
-                    content.title = "ClawMail: Recipient Approval Required"
-                    content.body = "Account \(accountLabel): \(emails.joined(separator: ", ")) need approval before sending."
-                    content.sound = .default
-                    let request = UNNotificationRequest(
-                        identifier: "pending-approval-\(UUID().uuidString)",
-                        content: content,
-                        trigger: nil
-                    )
-                    try? await center.add(request)
+                    await Self.schedulePendingApprovalNotification(accountLabel: accountLabel, emails: emails)
                 }
             }
 
@@ -147,5 +137,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appState.launchError = String(describing: error)
             appState.isRunning = false
         }
+    }
+
+    private static func requestNotificationAuthorization() async {
+        do {
+            _ = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+        } catch {
+            log("Failed to request notification authorization: \(describe(error))")
+        }
+    }
+
+    private static func schedulePendingApprovalNotification(accountLabel: String, emails: [String]) async {
+        let center = UNUserNotificationCenter.current()
+        let content = UNMutableNotificationContent()
+        content.title = "ClawMail: Recipient Approval Required"
+        content.body = "Account \(accountLabel): \(emails.joined(separator: ", ")) need approval before sending."
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "pending-approval-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+
+        do {
+            try await center.add(request)
+        } catch {
+            log("Failed to schedule pending approval notification for \(accountLabel): \(describe(error))")
+        }
+    }
+
+    private static func log(_ message: String) {
+        let line = "[ClawMailApp] \(message)\n"
+        FileHandle.standardError.write(Data(line.utf8))
+    }
+
+    private static func describe(_ error: Error) -> String {
+        if let clawMailError = error as? ClawMailError {
+            return clawMailError.message
+        }
+        if let localizedError = error as? LocalizedError,
+           let description = localizedError.errorDescription,
+           !description.isEmpty {
+            return description
+        }
+        return String(describing: error)
     }
 }

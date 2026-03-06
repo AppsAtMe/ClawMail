@@ -35,6 +35,27 @@ struct IPCIntegrationTests {
 
         // Verify socket file is cleaned up
         #expect(!FileManager.default.fileExists(atPath: socketPath))
+        // Verify token file is cleaned up
+        #expect(!FileManager.default.fileExists(atPath: server.tokenPath))
+        await orchestrator.stop()
+        try? FileManager.default.removeItem(atPath: dir)
+    }
+
+    @Test func ipcServerRemovesStaleSocketFileBeforeStarting() async throws {
+        let db = try TestConfig.inMemoryDatabase()
+        let config = TestConfig.testConfig()
+        let orchestrator = try AccountOrchestrator(config: config, databaseManager: db)
+
+        let dir = try Self.makeTestSocketDir()
+        let socketPath = dir + "/t.sock"
+        _ = FileManager.default.createFile(atPath: socketPath, contents: Data("stale".utf8))
+
+        let server = IPCServer(orchestrator: orchestrator, socketPath: socketPath)
+        try await server.start()
+
+        #expect(FileManager.default.fileExists(atPath: socketPath))
+
+        await server.stop()
         await orchestrator.stop()
         try? FileManager.default.removeItem(atPath: dir)
     }

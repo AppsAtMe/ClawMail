@@ -6,6 +6,7 @@ struct GuardrailsTab: View {
     @Environment(AppState.self) private var environmentAppState
     private let appStateOverride: AppState?
     private let loadApprovalStateAction: @MainActor (AppState) async throws -> ([ApprovedRecipient], [PendingApproval])
+    internal let inspection = Inspection<Self>()
 
     @State private var rateLimitEnabled = false
     @State private var maxPerMinute = ""
@@ -168,6 +169,7 @@ struct GuardrailsTab: View {
         .formStyle(.grouped)
         .padding()
         .onAppear { loadFromConfig() }
+        .onReceive(inspection.notice) { inspection.visit(self, $0) }
         .onChange(of: rateLimitEnabled) { _, _ in saveConfig() }
         .onChange(of: maxPerMinute) { _, _ in saveConfig() }
         .onChange(of: maxPerHour) { _, _ in saveConfig() }

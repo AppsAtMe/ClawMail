@@ -8,6 +8,7 @@ struct GeneralTab: View {
     private let saveConfigAction: @MainActor (AppConfig) throws -> Void
     private let installLaunchAgent: () -> Bool
     private let uninstallLaunchAgent: () -> Bool
+    internal let inspection = Inspection<Self>()
 
     @State private var launchAtLogin = true
     @State private var syncInterval = "15"
@@ -150,6 +151,7 @@ struct GeneralTab: View {
         .formStyle(.grouped)
         .padding()
         .onAppear { loadFromConfig() }
+        .onReceive(inspection.notice) { inspection.visit(self, $0) }
         .alert("Reset All Settings", isPresented: $showingResetConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) { resetSettings() }

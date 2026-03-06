@@ -7,6 +7,13 @@ import Foundation
 @Suite
 struct SecurityTests {
 
+    private func makeTemporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ClawMailSecurityTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
     // MARK: - IMAP Command Injection Prevention
 
     @Test func imapQuoteStripsNewlines() async {
@@ -156,6 +163,65 @@ struct SecurityTests {
             _ = try EmailManager.validateAttachmentSourcePath(home + "/Downloads/report.pdf")
         } catch {
             Issue.record("Should allow ~/Downloads path: \(error)")
+        }
+    }
+
+    @Test func validateSourcePathRejectsSymlinkIntoBlockedDirectory() throws {
+        let fileManager = FileManager.default
+        let tempDir = try makeTemporaryDirectory()
+        defer { try? fileManager.removeItem(at: tempDir) }
+
+        let symlink = tempDir.appendingPathComponent("hosts-link")
+        try fileManager.createSymbolicLink(
+            at: symlink,
+            withDestinationURL: URL(fileURLWithPath: "/etc/hosts")
+        )
+
+        do {
+            _ = try EmailManager.validateAttachmentSourcePath(symlink.path)
+            Issue.record("Should have rejected symlink into blocked directory")
+        } catch {
+            #expect(error is ClawMailError)
+        }
+    }
+
+    @Test func validateDestinationPathRejectsSymlinkedParentOutsideAllowedRoots() throws {
+        let fileManager = FileManager.default
+        let tempDir = try makeTemporaryDirectory()
+        let escapeDir = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent("ClawMailDestinationEscape-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? fileManager.removeItem(at: tempDir)
+            try? fileManager.removeItem(at: escapeDir)
+        }
+
+        try fileManager.createDirectory(at: escapeDir, withIntermediateDirectories: true)
+        let parentSymlink = tempDir.appendingPathComponent("escape", isDirectory: true)
+        try fileManager.createSymbolicLink(at: parentSymlink, withDestinationURL: escapeDir)
+
+        do {
+            _ = try EmailManager.validateDestinationPath(
+                parentSymlink.appendingPathComponent("download.txt").path
+            )
+            Issue.record("Should have rejected destination path escaping allowed roots")
+        } catch {
+            #expect(error is ClawMailError)
+        }
+    }
+
+    @Test func validateDestinationPathRejectsSiblingPrefixOutsideTempDirectory() throws {
+        let tempRoot = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let siblingPrefixPath = tempRoot.deletingLastPathComponent()
+            .appendingPathComponent("\(tempRoot.lastPathComponent)-escape", isDirectory: true)
+            .appendingPathComponent("download.txt")
+
+        do {
+            _ = try EmailManager.validateDestinationPath(siblingPrefixPath.path)
+            Issue.record("Should have rejected sibling path that only shares a string prefix")
+        } catch {
+            #expect(error is ClawMailError)
         }
     }
 

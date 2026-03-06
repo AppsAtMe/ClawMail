@@ -447,6 +447,7 @@ public actor IPCDispatcher {
         let arr: [AnyCodableValue] = recipients.map { r in
             .dictionary([
                 "email": .string(r.email),
+                "account": .string(r.accountLabel),
                 "approvedAt": .string(ISO8601DateFormatter().string(from: r.approvedAt)),
             ])
         }
@@ -465,8 +466,9 @@ public actor IPCDispatcher {
     }
 
     private func handleRecipientsRemove(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+        let account = try requireString(params, "account")
         let email = try requireString(params, "email")
-        try await orchestrator.removeApprovedRecipient(email: email)
+        try await orchestrator.removeApprovedRecipient(email: email, account: account)
         return .dictionary(["success": .bool(true)])
     }
 

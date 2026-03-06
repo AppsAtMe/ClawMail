@@ -5,11 +5,10 @@
     <key>Label</key>
     <string>com.clawmail.agent</string>
     <key>Program</key>
-    <string>/usr/local/bin/clawmail</string>
+    <string>/Applications/ClawMail.app/Contents/MacOS/ClawMailApp</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/clawmail</string>
-        <string>daemon</string>
+        <string>/Applications/ClawMail.app/Contents/MacOS/ClawMailApp</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

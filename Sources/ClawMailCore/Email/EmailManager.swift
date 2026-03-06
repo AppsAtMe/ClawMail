@@ -149,8 +149,8 @@ public actor EmailManager {
         var outgoingAttachments: [OutgoingAttachment] = []
         if let paths = request.attachments {
             for path in paths {
-                _ = try Self.validateAttachmentSourcePath(path)
-                let attachment = try OutgoingAttachment.fromFile(path: path)
+                let sourceURL = try Self.validateAttachmentSourcePath(path)
+                let attachment = try OutgoingAttachment.fromFile(path: sourceURL.path)
                 outgoingAttachments.append(attachment)
             }
         }
@@ -242,8 +242,8 @@ public actor EmailManager {
         var outgoingAttachments: [OutgoingAttachment] = []
         if let paths = attachments {
             for path in paths {
-                _ = try Self.validateAttachmentSourcePath(path)
-                let attachment = try OutgoingAttachment.fromFile(path: path)
+                let sourceURL = try Self.validateAttachmentSourcePath(path)
+                let attachment = try OutgoingAttachment.fromFile(path: sourceURL.path)
                 outgoingAttachments.append(attachment)
             }
         }
@@ -373,70 +373,99 @@ public actor EmailManager {
     // MARK: - Attachments
 
     /// Validate that a path is safe for writing (no path traversal, stays within allowed directories).
-    private static func validateDestinationPath(_ path: String) throws -> URL {
-        let url = URL(fileURLWithPath: path).standardized
-        let resolved = url.path
+    static func validateDestinationPath(_ path: String) throws -> URL {
+        let resolvedURL = try resolveValidatedFileURL(
+            path,
+            absolutePathError: "Destination path must be absolute"
+        )
 
-        // Must be an absolute path
-        guard resolved.hasPrefix("/") else {
-            throw ClawMailError.invalidParameter("Destination path must be absolute")
-        }
-
-        // Block writing outside user-accessible directories
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let tempDir = NSTemporaryDirectory()
-        let allowed = [
-            home + "/Downloads",
-            home + "/Documents",
-            home + "/Desktop",
-            tempDir,
+        let home = FileManager.default.homeDirectoryForCurrentUser
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let allowedRoots = [
+            home.appendingPathComponent("Downloads", isDirectory: true).standardizedFileURL,
+            home.appendingPathComponent("Documents", isDirectory: true).standardizedFileURL,
+            home.appendingPathComponent("Desktop", isDirectory: true).standardizedFileURL,
+            URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+                .resolvingSymlinksInPath()
+                .standardizedFileURL,
         ]
 
-        guard allowed.contains(where: { resolved.hasPrefix($0) }) else {
+        guard allowedRoots.contains(where: { isWithinDirectory(resolvedURL, directory: $0) }) else {
             throw ClawMailError.invalidParameter(
                 "Destination path must be within ~/Downloads, ~/Documents, ~/Desktop, or temp directory"
             )
         }
 
-        // Reject if the resolved path still contains ".." (shouldn't after standardized, but defense in depth)
-        guard !resolved.contains("..") else {
-            throw ClawMailError.invalidParameter("Path traversal detected in destination path")
-        }
-
-        return url
+        return resolvedURL
     }
 
     /// Validate that a source path is safe for reading as an attachment.
     static func validateAttachmentSourcePath(_ path: String) throws -> URL {
-        let url = URL(fileURLWithPath: path).standardized
-        let resolved = url.path
+        let resolvedURL = try resolveValidatedFileURL(
+            path,
+            absolutePathError: "Attachment path must be absolute"
+        )
 
-        guard resolved.hasPrefix("/") else {
-            throw ClawMailError.invalidParameter("Attachment path must be absolute")
+        let blockedRoots = [
+            "/etc", "/var", "/private", "/System", "/Library",
+            "/usr", "/bin", "/sbin", "/opt",
+        ].map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+                .resolvingSymlinksInPath()
+                .standardizedFileURL
         }
-
-        // Block reading from sensitive directories
-        let blocked = [
-            "/etc/", "/var/", "/private/", "/System/", "/Library/",
-            "/usr/", "/bin/", "/sbin/", "/opt/",
+        let home = FileManager.default.homeDirectoryForCurrentUser
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let sensitiveHomeRoots = [
+            home.appendingPathComponent(".ssh", isDirectory: true).standardizedFileURL,
+            home.appendingPathComponent(".gnupg", isDirectory: true).standardizedFileURL,
+            home.appendingPathComponent(".config", isDirectory: true).standardizedFileURL,
+            home.appendingPathComponent(".aws", isDirectory: true).standardizedFileURL,
+            home.appendingPathComponent("Library/Keychains", isDirectory: true).standardizedFileURL,
+            home.appendingPathComponent("Library/Application Support/ClawMail", isDirectory: true).standardizedFileURL,
         ]
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let sensitiveHome = [
-            home + "/.ssh", home + "/.gnupg", home + "/.config",
-            home + "/.aws", home + "/Library/Keychains",
-            home + "/Library/Application Support/ClawMail",
-        ]
 
-        let allBlocked = blocked + sensitiveHome
-        guard !allBlocked.contains(where: { resolved.hasPrefix($0) }) else {
+        let blocked = blockedRoots + sensitiveHomeRoots
+        guard !blocked.contains(where: { isWithinDirectory(resolvedURL, directory: $0) }) else {
             throw ClawMailError.invalidParameter("Access to this path is restricted for security")
         }
 
-        guard !resolved.contains("..") else {
-            throw ClawMailError.invalidParameter("Path traversal detected in attachment path")
+        return resolvedURL
+    }
+
+    private static func resolveValidatedFileURL(
+        _ path: String,
+        absolutePathError: String
+    ) throws -> URL {
+        guard (path as NSString).isAbsolutePath else {
+            throw ClawMailError.invalidParameter(absolutePathError)
         }
 
-        return url
+        let candidate = URL(fileURLWithPath: path).standardizedFileURL
+        let fileManager = FileManager.default
+
+        if fileManager.fileExists(atPath: candidate.path) {
+            return candidate.resolvingSymlinksInPath().standardizedFileURL
+        }
+
+        let resolvedParent = candidate.deletingLastPathComponent()
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        return resolvedParent.appendingPathComponent(candidate.lastPathComponent, isDirectory: false)
+            .standardizedFileURL
+    }
+
+    private static func isWithinDirectory(_ candidate: URL, directory: URL) -> Bool {
+        let candidateComponents = candidate.standardizedFileURL.pathComponents
+        let directoryComponents = directory.standardizedFileURL.pathComponents
+
+        guard candidateComponents.count >= directoryComponents.count else {
+            return false
+        }
+
+        return zip(directoryComponents, candidateComponents).allSatisfy(==)
     }
 
     public func downloadAttachment(

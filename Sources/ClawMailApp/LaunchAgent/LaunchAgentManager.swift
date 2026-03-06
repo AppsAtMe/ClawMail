@@ -4,6 +4,7 @@ import Foundation
 enum LaunchAgentManager {
     static let label = "com.clawmail.agent"
     static let plistFilename = "\(label).plist"
+    static let installedAppExecutablePath = "/Applications/ClawMail.app/Contents/MacOS/ClawMailApp"
 
     static var launchAgentsDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -12,6 +13,14 @@ enum LaunchAgentManager {
 
     static var plistURL: URL {
         launchAgentsDirectory.appendingPathComponent(plistFilename)
+    }
+
+    static var defaultProgramPath: String {
+        guard let executablePath = Bundle.main.executableURL?.path,
+              executablePath.hasSuffix("/ClawMailApp") else {
+            return installedAppExecutablePath
+        }
+        return executablePath
     }
 
     /// Escape a string for safe inclusion in XML/plist content.
@@ -24,7 +33,7 @@ enum LaunchAgentManager {
     }
 
     /// Generate the LaunchAgent plist content.
-    static func plistContent(programPath: String = "/usr/local/bin/clawmail") -> String {
+    static func plistContent(programPath: String = defaultProgramPath) -> String {
         let safePath = xmlEscape(programPath)
         return """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -38,7 +47,6 @@ enum LaunchAgentManager {
             <key>ProgramArguments</key>
             <array>
                 <string>\(safePath)</string>
-                <string>daemon</string>
             </array>
             <key>RunAtLoad</key>
             <true/>
@@ -57,7 +65,7 @@ enum LaunchAgentManager {
 
     /// Install the LaunchAgent plist and load it.
     @discardableResult
-    static func install(programPath: String = "/usr/local/bin/clawmail") -> Bool {
+    static func install(programPath: String = defaultProgramPath) -> Bool {
         do {
             // Ensure LaunchAgents directory exists
             try FileManager.default.createDirectory(

@@ -502,7 +502,7 @@ public actor AccountOrchestrator {
 
     // MARK: - Approved Recipients
 
-    public func listApprovedRecipients(account: String? = nil) throws -> [(email: String, approvedAt: Date)] {
+    public func listApprovedRecipients(account: String? = nil) throws -> [ApprovedRecipient] {
         try metadataIndex.listApprovedRecipients(account: account)
     }
 
@@ -510,8 +510,8 @@ public actor AccountOrchestrator {
         try metadataIndex.approveRecipient(email: email, account: account)
     }
 
-    public func removeApprovedRecipient(email: String) throws {
-        try metadataIndex.removeApprovedRecipient(email: email)
+    public func removeApprovedRecipient(email: String, account: String) throws {
+        try metadataIndex.removeApprovedRecipient(email: email, account: account)
     }
 
     public func approvePendingRecipients(emails: [String], account: String) throws {
@@ -589,7 +589,7 @@ public actor AccountOrchestrator {
         var taskMgr: TaskManager? = nil
 
         if let caldavURL = account.caldavURL {
-            let caldavClient = CalDAVClient(
+            let caldavClient = try CalDAVClient(
                 baseURL: caldavURL,
                 credential: credentials.calDAVCredential(username: account.emailAddress)
             )
@@ -599,7 +599,7 @@ public actor AccountOrchestrator {
         }
 
         if let carddavURL = account.carddavURL {
-            let carddavClient = CardDAVClient(
+            let carddavClient = try CardDAVClient(
                 baseURL: carddavURL,
                 credential: credentials.cardDAVCredential(username: account.emailAddress)
             )

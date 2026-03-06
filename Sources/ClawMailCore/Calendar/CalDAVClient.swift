@@ -51,8 +51,8 @@ public actor CalDAVClient {
 
     // MARK: - Initialization
 
-    public init(baseURL: URL, credential: CalDAVCredential, session: URLSession? = nil) {
-        self.baseURL = baseURL
+    public init(baseURL: URL, credential: CalDAVCredential, session: URLSession? = nil) throws {
+        self.baseURL = try DAVURLValidator.validateConfiguredURL(baseURL, serviceName: "CalDAV")
         self.credential = credential
         self.session = session ?? URLSession.shared
     }
@@ -125,7 +125,7 @@ public actor CalDAVClient {
         let parsed = WebDAVResponseParser.parse(data: data)
         if let principal = parsed.first?.properties["current-user-principal"] {
             // Discover calendar-home-set from the principal
-            await discoverCalendarHome(principalPath: principal)
+            try await discoverCalendarHome(principalPath: principal)
         }
     }
 
@@ -133,8 +133,7 @@ public actor CalDAVClient {
 
     /// List all calendars from the calendar-home-set.
     public func listCalendars() async throws -> [CalDAVCalendar] {
-        let homePath = try await resolveCalendarHomePath()
-        let homeURL = baseURL.resolvingRelative(path: homePath)
+        let homeURL = try await resolveCalendarHomeURL()
 
         var request = URLRequest(url: homeURL)
         request.httpMethod = "PROPFIND"
@@ -159,10 +158,11 @@ public actor CalDAVClient {
         for item in responses {
             // Only include actual calendar collections (skip the home itself)
             guard item.isCalendarCollection else { continue }
+            let hrefURL = try resolveServerURL(item.href, context: "listCalendars href")
 
             let components = item.supportedComponents
             let calendar = CalDAVCalendar(
-                href: item.href,
+                href: hrefURL.path,
                 displayName: item.properties["displayname"] ?? item.href.lastPathComponent,
                 color: item.properties["calendar-color"],
                 supportedComponents: components.isEmpty ? Set(["VEVENT"]) : components
@@ -175,7 +175,7 @@ public actor CalDAVClient {
 
     /// Retrieve events from a calendar within a date range using REPORT calendar-query.
     public func getEvents(calendar: String, from startDate: Date, to endDate: Date) async throws -> [String] {
-        let calURL = baseURL.resolvingRelative(path: calendar)
+        let calURL = try resolveServerURL(calendar, context: "getEvents calendar")
 
         var request = URLRequest(url: calURL)
         request.httpMethod = "REPORT"
@@ -201,7 +201,7 @@ public actor CalDAVClient {
     public func createEvent(calendar: String, icalendar: String) async throws -> String {
         let uid = ICalendarParser.extractUID(from: icalendar) ?? UUID().uuidString
         let resourcePath = calendar.hasSuffix("/") ? "\(calendar)\(uid).ics" : "\(calendar)/\(uid).ics"
-        let resourceURL = baseURL.resolvingRelative(path: resourcePath)
+        let resourceURL = try resolveServerURL(resourcePath, context: "createEvent resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "PUT"
@@ -219,7 +219,7 @@ public actor CalDAVClient {
     /// Update an existing event.
     public func updateEvent(calendar: String, uid: String, icalendar: String) async throws {
         let resourcePath = calendar.hasSuffix("/") ? "\(calendar)\(uid).ics" : "\(calendar)/\(uid).ics"
-        let resourceURL = baseURL.resolvingRelative(path: resourcePath)
+        let resourceURL = try resolveServerURL(resourcePath, context: "updateEvent resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "PUT"
@@ -234,7 +234,7 @@ public actor CalDAVClient {
     /// Delete an event by UID.
     public func deleteEvent(calendar: String, uid: String) async throws {
         let resourcePath = calendar.hasSuffix("/") ? "\(calendar)\(uid).ics" : "\(calendar)/\(uid).ics"
-        let resourceURL = baseURL.resolvingRelative(path: resourcePath)
+        let resourceURL = try resolveServerURL(resourcePath, context: "deleteEvent resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "DELETE"
@@ -254,7 +254,7 @@ public actor CalDAVClient {
 
     /// Retrieve tasks (VTODOs) from a task list.
     public func getTasks(taskList: String, includeCompleted: Bool = true) async throws -> [String] {
-        let listURL = baseURL.resolvingRelative(path: taskList)
+        let listURL = try resolveServerURL(taskList, context: "getTasks task list")
 
         var request = URLRequest(url: listURL)
         request.httpMethod = "REPORT"
@@ -276,7 +276,7 @@ public actor CalDAVClient {
     public func createTask(taskList: String, icalendar: String) async throws -> String {
         let uid = ICalendarParser.extractUID(from: icalendar) ?? UUID().uuidString
         let resourcePath = taskList.hasSuffix("/") ? "\(taskList)\(uid).ics" : "\(taskList)/\(uid).ics"
-        let resourceURL = baseURL.resolvingRelative(path: resourcePath)
+        let resourceURL = try resolveServerURL(resourcePath, context: "createTask resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "PUT"
@@ -294,7 +294,7 @@ public actor CalDAVClient {
     /// Update an existing task.
     public func updateTask(taskList: String, uid: String, icalendar: String) async throws {
         let resourcePath = taskList.hasSuffix("/") ? "\(taskList)\(uid).ics" : "\(taskList)/\(uid).ics"
-        let resourceURL = baseURL.resolvingRelative(path: resourcePath)
+        let resourceURL = try resolveServerURL(resourcePath, context: "updateTask resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "PUT"
@@ -309,7 +309,7 @@ public actor CalDAVClient {
     /// Delete a task by UID.
     public func deleteTask(taskList: String, uid: String) async throws {
         let resourcePath = taskList.hasSuffix("/") ? "\(taskList)\(uid).ics" : "\(taskList)/\(uid).ics"
-        let resourceURL = baseURL.resolvingRelative(path: resourcePath)
+        let resourceURL = try resolveServerURL(resourcePath, context: "deleteTask resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "DELETE"
@@ -350,8 +350,8 @@ public actor CalDAVClient {
         }
     }
 
-    private func discoverCalendarHome(principalPath: String) async {
-        let principalURL = baseURL.resolvingRelative(path: principalPath)
+    private func discoverCalendarHome(principalPath: String) async throws {
+        let principalURL = try resolveServerURL(principalPath, context: "discoverCalendarHome principal")
 
         var request = URLRequest(url: principalURL)
         request.httpMethod = "PROPFIND"
@@ -362,25 +362,31 @@ public actor CalDAVClient {
         let body = WebDAVXMLBuilder.propfind(properties: ["c:calendar-home-set"])
         request.httpBody = body.data(using: .utf8)
 
-        do {
-            let (data, _) = try await session.data(for: request)
-            let responses = WebDAVResponseParser.parse(data: data)
-            if let home = responses.first?.properties["calendar-home-set"] {
-                self.calendarHomePath = home
-            }
-        } catch {
-            // Discovery failure is non-fatal; we'll fall back to base URL
+        let (data, _) = try await session.data(for: request)
+        let responses = WebDAVResponseParser.parse(data: data)
+        if let home = responses.first?.properties["calendar-home-set"] {
+            let homeURL = try resolveServerURL(home, context: "discoverCalendarHome home-set")
+            self.calendarHomePath = homeURL.path
         }
     }
 
-    private func resolveCalendarHomePath() async throws -> String {
+    private func resolveCalendarHomeURL() async throws -> URL {
         if let home = calendarHomePath {
-            return home
+            return try resolveServerURL(home, context: "resolveCalendarHome")
         }
         // If we don't have a calendar home yet, try to discover it
         try await authenticate()
         // If still no calendar home, use the base URL path
-        return calendarHomePath ?? baseURL.path
+        return try resolveServerURL(calendarHomePath ?? baseURL.path, context: "resolveCalendarHome")
+    }
+
+    private func resolveServerURL(_ path: String, context: String) throws -> URL {
+        try DAVURLValidator.resolveServerURL(
+            path,
+            relativeTo: baseURL,
+            serviceName: "CalDAV",
+            context: context
+        )
     }
 }
 
@@ -970,27 +976,6 @@ public enum ICalendarParser: Sendable {
             .replacingOccurrences(of: "\\;", with: ";")
             .replacingOccurrences(of: "\\,", with: ",")
             .replacingOccurrences(of: "\\\\", with: "\\")
-    }
-}
-
-// MARK: - URL Extension
-
-extension URL {
-    /// Resolve a path relative to this URL's scheme and host.
-    func resolvingRelative(path: String) -> URL {
-        if path.hasPrefix("http://") || path.hasPrefix("https://") {
-            return URL(string: path) ?? self.appendingPathComponent(path)
-        }
-        if path.hasPrefix("/") {
-            // Absolute path -- combine with scheme+host
-            var components = URLComponents()
-            components.scheme = self.scheme
-            components.host = self.host
-            components.port = self.port
-            components.path = path
-            return components.url ?? self.appendingPathComponent(path)
-        }
-        return self.appendingPathComponent(path)
     }
 }
 

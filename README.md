@@ -44,6 +44,8 @@ This builds a release binary, creates `ClawMail.app`, copies it to `/Application
 | `/usr/local/bin/clawmail` | `ClawMail.app/Contents/MacOS/ClawMailCLI` |
 | `/usr/local/bin/clawmail-mcp` | `ClawMail.app/Contents/MacOS/ClawMailMCP` |
 
+Launch at login installs `~/Library/LaunchAgents/com.clawmail.agent.plist`, which starts `/Applications/ClawMail.app/Contents/MacOS/ClawMailApp`.
+
 ### Uninstall
 
 ```bash

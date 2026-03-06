@@ -45,7 +45,7 @@ public actor GuardrailEngine {
         if guardrailConfig.firstTimeRecipientApproval {
             var needsApproval: [String] = []
             for recipient in recipients {
-                let approved = try metadataIndex.isRecipientApproved(email: recipient.email)
+                let approved = try metadataIndex.isRecipientApproved(email: recipient.email, account: account)
                 if !approved {
                     needsApproval.append(recipient.email)
                 }

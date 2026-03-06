@@ -116,7 +116,7 @@ struct ConnectionTestView: View {
                         username: account.emailAddress,
                         password: password
                     )
-                    let client = CalDAVClient(baseURL: caldavURL, credential: cred)
+                    let client = try CalDAVClient(baseURL: caldavURL, credential: cred)
                     try await client.authenticate()
                 })
             }
@@ -128,7 +128,7 @@ struct ConnectionTestView: View {
                         username: account.emailAddress,
                         password: password
                     )
-                    let client = CardDAVClient(baseURL: carddavURL, credential: cred)
+                    let client = try CardDAVClient(baseURL: carddavURL, credential: cred)
                     try await client.authenticate()
                 })
             }

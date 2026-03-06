@@ -119,10 +119,12 @@ public final class DatabaseManager: Sendable {
         // Migration 5: Approved recipients
         migrator.registerMigration("createApprovedRecipients") { db in
             try db.create(table: "approved_recipients") { t in
-                t.column("email", .text).primaryKey()
-                t.column("approved_at", .datetime).notNull().defaults(sql: "CURRENT_TIMESTAMP")
+                t.column("email", .text).notNull()
                 t.column("account_label", .text).notNull()
+                t.column("approved_at", .datetime).notNull().defaults(sql: "CURRENT_TIMESTAMP")
+                t.primaryKey(["email", "account_label"])
             }
+            try db.create(index: "idx_approved_recipients_account", on: "approved_recipients", columns: ["account_label"])
         }
 
         // Migration 6: Pending approvals
@@ -135,6 +137,26 @@ public final class DatabaseManager: Sendable {
                 t.column("created_at", .datetime).notNull().defaults(sql: "CURRENT_TIMESTAMP")
                 t.column("status", .text).notNull().defaults(to: "pending")
             }
+        }
+
+        // Migration 7: Scope approved recipients by account.
+        migrator.registerMigration("scopeApprovedRecipientsByAccount") { db in
+            try db.create(table: "approved_recipients_v2") { t in
+                t.column("email", .text).notNull()
+                t.column("account_label", .text).notNull()
+                t.column("approved_at", .datetime).notNull().defaults(sql: "CURRENT_TIMESTAMP")
+                t.primaryKey(["email", "account_label"])
+            }
+            try db.execute(
+                sql: """
+                    INSERT INTO approved_recipients_v2 (email, account_label, approved_at)
+                    SELECT email, account_label, approved_at
+                    FROM approved_recipients
+                """
+            )
+            try db.drop(table: "approved_recipients")
+            try db.rename(table: "approved_recipients_v2", to: "approved_recipients")
+            try db.create(index: "idx_approved_recipients_account", on: "approved_recipients", columns: ["account_label"])
         }
 
         try migrator.migrate(writer)

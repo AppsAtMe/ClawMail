@@ -39,8 +39,8 @@ public actor CardDAVClient {
 
     // MARK: - Initialization
 
-    public init(baseURL: URL, credential: CardDAVCredential, session: URLSession? = nil) {
-        self.baseURL = baseURL
+    public init(baseURL: URL, credential: CardDAVCredential, session: URLSession? = nil) throws {
+        self.baseURL = try DAVURLValidator.validateConfiguredURL(baseURL, serviceName: "CardDAV")
         self.credential = credential
         self.session = session ?? URLSession.shared
     }
@@ -109,7 +109,7 @@ public actor CardDAVClient {
         // Try to extract current-user-principal for later use
         let parsed = CardDAVResponseParser.parse(data: data)
         if let principal = parsed.first?.properties["current-user-principal"] {
-            await discoverAddressBookHome(principalPath: principal)
+            try await discoverAddressBookHome(principalPath: principal)
         }
     }
 
@@ -117,8 +117,7 @@ public actor CardDAVClient {
 
     /// List all address books from the addressbook-home-set.
     public func listAddressBooks() async throws -> [CardDAVAddressBook] {
-        let homePath = try await resolveAddressBookHomePath()
-        let homeURL = baseURL.resolvingRelative(path: homePath)
+        let homeURL = try await resolveAddressBookHomeURL()
 
         var request = URLRequest(url: homeURL)
         request.httpMethod = "PROPFIND"
@@ -140,8 +139,9 @@ public actor CardDAVClient {
 
         for item in responses {
             guard item.isAddressBookCollection else { continue }
+            let hrefURL = try resolveServerURL(item.href, context: "listAddressBooks href")
             let book = CardDAVAddressBook(
-                href: item.href,
+                href: hrefURL.path,
                 displayName: item.properties["displayname"] ?? item.href.lastPathComponent
             )
             books.append(book)
@@ -153,7 +153,7 @@ public actor CardDAVClient {
     /// Retrieve contacts from an address book, optionally filtered by a text query.
     /// Returns raw vCard strings.
     public func getContacts(addressBook: String, query: String? = nil) async throws -> [String] {
-        let bookURL = baseURL.resolvingRelative(path: addressBook)
+        let bookURL = try resolveServerURL(addressBook, context: "getContacts address book")
 
         var request = URLRequest(url: bookURL)
         request.httpMethod = "REPORT"
@@ -180,7 +180,7 @@ public actor CardDAVClient {
     public func createContact(addressBook: String, vcard: String) async throws -> String {
         let uid = VCardParser.extractUID(from: vcard) ?? UUID().uuidString
         let resourcePath = addressBook.hasSuffix("/") ? "\(addressBook)\(uid).vcf" : "\(addressBook)/\(uid).vcf"
-        let resourceURL = baseURL.resolvingRelative(path: resourcePath)
+        let resourceURL = try resolveServerURL(resourcePath, context: "createContact resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "PUT"
@@ -198,7 +198,7 @@ public actor CardDAVClient {
     /// Update an existing contact.
     public func updateContact(addressBook: String, uid: String, vcard: String) async throws {
         let resourcePath = addressBook.hasSuffix("/") ? "\(addressBook)\(uid).vcf" : "\(addressBook)/\(uid).vcf"
-        let resourceURL = baseURL.resolvingRelative(path: resourcePath)
+        let resourceURL = try resolveServerURL(resourcePath, context: "updateContact resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "PUT"
@@ -213,7 +213,7 @@ public actor CardDAVClient {
     /// Delete a contact by UID.
     public func deleteContact(addressBook: String, uid: String) async throws {
         let resourcePath = addressBook.hasSuffix("/") ? "\(addressBook)\(uid).vcf" : "\(addressBook)/\(uid).vcf"
-        let resourceURL = baseURL.resolvingRelative(path: resourcePath)
+        let resourceURL = try resolveServerURL(resourcePath, context: "deleteContact resource")
 
         var request = URLRequest(url: resourceURL)
         request.httpMethod = "DELETE"
@@ -254,8 +254,8 @@ public actor CardDAVClient {
         }
     }
 
-    private func discoverAddressBookHome(principalPath: String) async {
-        let principalURL = baseURL.resolvingRelative(path: principalPath)
+    private func discoverAddressBookHome(principalPath: String) async throws {
+        let principalURL = try resolveServerURL(principalPath, context: "discoverAddressBookHome principal")
 
         var request = URLRequest(url: principalURL)
         request.httpMethod = "PROPFIND"
@@ -266,23 +266,29 @@ public actor CardDAVClient {
         let body = CardDAVXMLBuilder.propfind(properties: ["card:addressbook-home-set"])
         request.httpBody = body.data(using: .utf8)
 
-        do {
-            let (data, _) = try await session.data(for: request)
-            let responses = CardDAVResponseParser.parse(data: data)
-            if let home = responses.first?.properties["addressbook-home-set"] {
-                self.addressBookHomePath = home
-            }
-        } catch {
-            // Non-fatal
+        let (data, _) = try await session.data(for: request)
+        let responses = CardDAVResponseParser.parse(data: data)
+        if let home = responses.first?.properties["addressbook-home-set"] {
+            let homeURL = try resolveServerURL(home, context: "discoverAddressBookHome home-set")
+            self.addressBookHomePath = homeURL.path
         }
     }
 
-    private func resolveAddressBookHomePath() async throws -> String {
+    private func resolveAddressBookHomeURL() async throws -> URL {
         if let home = addressBookHomePath {
-            return home
+            return try resolveServerURL(home, context: "resolveAddressBookHome")
         }
         try await authenticate()
-        return addressBookHomePath ?? baseURL.path
+        return try resolveServerURL(addressBookHomePath ?? baseURL.path, context: "resolveAddressBookHome")
+    }
+
+    private func resolveServerURL(_ path: String, context: String) throws -> URL {
+        try DAVURLValidator.resolveServerURL(
+            path,
+            relativeTo: baseURL,
+            serviceName: "CardDAV",
+            context: context
+        )
     }
 }
 

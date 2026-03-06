@@ -1,0 +1,264 @@
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+import Testing
+@testable import ClawMailCore
+
+@Suite(.serialized)
+struct DAVSecurityTests {
+
+    @Test func calDAVRejectsPlaintextBaseURL() throws {
+        do {
+            _ = try CalDAVClient(
+                baseURL: URL(string: "http://calendar.example.com/dav")!,
+                credential: .password(username: "user", password: "pass")
+            )
+            Issue.record("Expected CalDAV client init to reject plaintext HTTP")
+        } catch let error as ClawMailError {
+            #expect(error.message.contains("CalDAV URL must use HTTPS"))
+        }
+    }
+
+    @Test func cardDAVRejectsPlaintextBaseURL() throws {
+        do {
+            _ = try CardDAVClient(
+                baseURL: URL(string: "http://contacts.example.com/dav")!,
+                credential: .password(username: "user", password: "pass")
+            )
+            Issue.record("Expected CardDAV client init to reject plaintext HTTP")
+        } catch let error as ClawMailError {
+            #expect(error.message.contains("CardDAV URL must use HTTPS"))
+        }
+    }
+
+    @Test func calDAVRejectsCrossOriginPrincipalURL() async throws {
+        let session = makeSession()
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "calendar.example.com")
+            #expect(request.value(forHTTPHeaderField: "Authorization") != nil)
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "current-user-principal",
+                    href: "https://attacker.example.com/principals/evil/"
+                )
+            )
+        }
+
+        let client = try CalDAVClient(
+            baseURL: URL(string: "https://calendar.example.com/dav")!,
+            credential: .password(username: "user", password: "pass"),
+            session: session
+        )
+
+        do {
+            try await client.authenticate()
+            Issue.record("Expected cross-origin principal URL to fail authentication")
+        } catch let error as ClawMailError {
+            #expect(error.message.contains("cross-origin"))
+        }
+
+        let requests = MockDAVURLProtocol.recordedRequests()
+        #expect(requests.count == 1)
+        #expect(requests.allSatisfy { $0.url?.host == "calendar.example.com" })
+    }
+
+    @Test func cardDAVRejectsCrossOriginHomeSetURL() async throws {
+        let session = makeSession()
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "contacts.example.com")
+            #expect(request.value(forHTTPHeaderField: "Authorization") != nil)
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "current-user-principal",
+                    href: "/principals/user/"
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "contacts.example.com")
+            #expect(request.value(forHTTPHeaderField: "Authorization") != nil)
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "addressbook-home-set",
+                    href: "https://attacker.example.com/addressbooks/evil/"
+                )
+            )
+        }
+
+        let client = try CardDAVClient(
+            baseURL: URL(string: "https://contacts.example.com/dav")!,
+            credential: .password(username: "user", password: "pass"),
+            session: session
+        )
+
+        do {
+            try await client.authenticate()
+            Issue.record("Expected cross-origin addressbook-home-set to fail authentication")
+        } catch let error as ClawMailError {
+            #expect(error.message.contains("cross-origin"))
+        }
+
+        let requests = MockDAVURLProtocol.recordedRequests()
+        #expect(requests.count == 2)
+        #expect(requests.allSatisfy { $0.url?.host == "contacts.example.com" })
+    }
+
+    @Test func calDAVRejectsCrossOriginCalendarHrefDuringListing() async throws {
+        let session = makeSession()
+        MockDAVURLProtocol.enqueue { request in
+            self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "current-user-principal",
+                    href: "/principals/user/"
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "calendar-home-set",
+                    href: "/calendars/user/"
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            self.response(
+                url: request.url!,
+                body: """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+                  <d:response>
+                    <d:href>https://attacker.example.com/calendars/evil/</d:href>
+                    <d:propstat>
+                      <d:prop>
+                        <d:displayname>Compromised</d:displayname>
+                        <d:resourcetype>
+                          <d:collection/>
+                          <c:calendar/>
+                        </d:resourcetype>
+                        <c:supported-calendar-component-set>
+                          <c:comp name="VEVENT"/>
+                        </c:supported-calendar-component-set>
+                      </d:prop>
+                      <d:status>HTTP/1.1 200 OK</d:status>
+                    </d:propstat>
+                  </d:response>
+                </d:multistatus>
+                """
+            )
+        }
+
+        let client = try CalDAVClient(
+            baseURL: URL(string: "https://calendar.example.com/dav")!,
+            credential: .password(username: "user", password: "pass"),
+            session: session
+        )
+
+        do {
+            _ = try await client.listCalendars()
+            Issue.record("Expected cross-origin calendar href to be rejected")
+        } catch let error as ClawMailError {
+            #expect(error.message.contains("cross-origin"))
+        }
+
+        let requests = MockDAVURLProtocol.recordedRequests()
+        #expect(requests.count == 3)
+        #expect(requests.allSatisfy { $0.url?.host == "calendar.example.com" })
+    }
+
+    private func makeSession() -> URLSession {
+        MockDAVURLProtocol.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockDAVURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    private func response(url: URL, status: Int = 207, body: String) -> (HTTPURLResponse, Data) {
+        (
+            HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!,
+            Data(body.utf8)
+        )
+    }
+
+    private func multistatusBody(property: String, href: String) -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <d:multistatus xmlns:d="DAV:">
+          <d:response>
+            <d:href>/dav/</d:href>
+            <d:propstat>
+              <d:prop>
+                <d:\(property)>
+                  <d:href>\(href)</d:href>
+                </d:\(property)>
+              </d:prop>
+              <d:status>HTTP/1.1 200 OK</d:status>
+            </d:propstat>
+          </d:response>
+        </d:multistatus>
+        """
+    }
+}
+
+private final class MockDAVURLProtocol: URLProtocol, @unchecked Sendable {
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var handlers: [@Sendable (URLRequest) throws -> (HTTPURLResponse, Data)] = []
+    private nonisolated(unsafe) static var requests: [URLRequest] = []
+
+    static func reset() {
+        lock.lock()
+        defer { lock.unlock() }
+        handlers = []
+        requests = []
+    }
+
+    static func enqueue(_ handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)) {
+        lock.lock()
+        defer { lock.unlock() }
+        handlers.append(handler)
+    }
+
+    static func recordedRequests() -> [URLRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return requests
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        let handler: (@Sendable (URLRequest) throws -> (HTTPURLResponse, Data))?
+        Self.lock.lock()
+        Self.requests.append(request)
+        handler = Self.handlers.isEmpty ? nil : Self.handlers.removeFirst()
+        Self.lock.unlock()
+
+        guard let handler else {
+            client?.urlProtocol(self, didFailWithError: ClawMailError.serverError("No mock response configured"))
+            return
+        }
+
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}

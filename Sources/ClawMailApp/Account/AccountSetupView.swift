@@ -94,6 +94,7 @@ struct AccountSetupView: View {
                 password: $password,
                 caldavURL: $caldavURL,
                 carddavURL: $carddavURL,
+                davValidationError: davURLValidationError,
                 oauthInProgress: $oauthInProgress,
                 onTokensObtained: { tokens in
                     oauthTokens = tokens
@@ -153,8 +154,14 @@ struct AccountSetupView: View {
         switch step {
         case .provider: return true
         case .credentials:
-            if provider != .other { return !oauthInProgress && oauthTokens != nil }
-            return !emailAddress.isEmpty && !password.isEmpty && !imapHost.isEmpty && !smtpHost.isEmpty
+            if provider != .other {
+                return !oauthInProgress && oauthTokens != nil && davURLValidationError == nil
+            }
+            return !emailAddress.isEmpty
+                && !password.isEmpty
+                && !imapHost.isEmpty
+                && !smtpHost.isEmpty
+                && davURLValidationError == nil
         case .connectionTest: return !testInProgress
         case .label: return !accountLabel.isEmpty
         case .done: return true
@@ -202,8 +209,8 @@ struct AccountSetupView: View {
             smtpHost: smtpHost,
             smtpPort: Int(smtpPort) ?? 465,
             smtpSecurity: smtpSecurity,
-            caldavURL: URL(string: caldavURL),
-            carddavURL: URL(string: carddavURL)
+            caldavURL: validatedDAVURL(caldavURL, serviceName: "CalDAV"),
+            carddavURL: validatedDAVURL(carddavURL, serviceName: "CardDAV")
         )
     }
 
@@ -219,8 +226,8 @@ struct AccountSetupView: View {
             smtpHost: smtpHost,
             smtpPort: Int(smtpPort) ?? 465,
             smtpSecurity: smtpSecurity,
-            caldavURL: URL(string: caldavURL),
-            carddavURL: URL(string: carddavURL)
+            caldavURL: validatedDAVURL(caldavURL, serviceName: "CalDAV"),
+            carddavURL: validatedDAVURL(carddavURL, serviceName: "CardDAV")
         )
 
         Task {
@@ -242,6 +249,26 @@ struct AccountSetupView: View {
                 saveError = String(describing: error)
                 step = .label
             }
+        }
+    }
+
+    private var davURLValidationError: String? {
+        validationError(for: caldavURL, serviceName: "CalDAV")
+            ?? validationError(for: carddavURL, serviceName: "CardDAV")
+    }
+
+    private func validatedDAVURL(_ rawValue: String, serviceName: String) -> URL? {
+        try? DAVURLValidator.validateOptionalURLString(rawValue, serviceName: serviceName)
+    }
+
+    private func validationError(for rawValue: String, serviceName: String) -> String? {
+        do {
+            _ = try DAVURLValidator.validateOptionalURLString(rawValue, serviceName: serviceName)
+            return nil
+        } catch let error as ClawMailError {
+            return error.message
+        } catch {
+            return String(describing: error)
         }
     }
 }
@@ -305,6 +332,7 @@ private struct CredentialsFormView: View {
     @Binding var password: String
     @Binding var caldavURL: String
     @Binding var carddavURL: String
+    let davValidationError: String?
     @Binding var oauthInProgress: Bool
     var onTokensObtained: ((OAuthTokens) -> Void)?
 
@@ -398,6 +426,11 @@ private struct CredentialsFormView: View {
                 .textFieldStyle(.roundedBorder)
             TextField("CardDAV URL (optional)", text: $carddavURL)
                 .textFieldStyle(.roundedBorder)
+            if let davValidationError {
+                Text(davValidationError)
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
         }
     }
 }

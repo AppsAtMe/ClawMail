@@ -216,12 +216,12 @@ public final class MetadataIndex: Sendable {
 
     // MARK: - Approved Recipients
 
-    public func isRecipientApproved(email: String) throws -> Bool {
+    public func isRecipientApproved(email: String, account: String) throws -> Bool {
         try db.read { db in
             let count = try Int.fetchOne(
                 db,
-                sql: "SELECT COUNT(*) FROM approved_recipients WHERE email = ?",
-                arguments: [email]
+                sql: "SELECT COUNT(*) FROM approved_recipients WHERE email = ? AND account_label = ?",
+                arguments: [email, account]
             )
             return (count ?? 0) > 0
         }
@@ -236,25 +236,31 @@ public final class MetadataIndex: Sendable {
         }
     }
 
-    public func listApprovedRecipients(account: String? = nil) throws -> [(email: String, approvedAt: Date)] {
+    public func listApprovedRecipients(account: String? = nil) throws -> [ApprovedRecipient] {
         try db.read { db in
-            var sql = "SELECT email, approved_at FROM approved_recipients"
+            var sql = "SELECT email, account_label, approved_at FROM approved_recipients"
             var args: StatementArguments = []
             if let account = account {
                 sql += " WHERE account_label = ?"
                 args += [account]
             }
-            sql += " ORDER BY approved_at DESC"
+            sql += " ORDER BY approved_at DESC, account_label ASC, email ASC"
             let rows = try Row.fetchAll(db, sql: sql, arguments: args)
-            return rows.map { (email: $0["email"], approvedAt: $0["approved_at"]) }
+            return rows.map {
+                ApprovedRecipient(
+                    email: $0["email"],
+                    accountLabel: $0["account_label"],
+                    approvedAt: $0["approved_at"]
+                )
+            }
         }
     }
 
-    public func removeApprovedRecipient(email: String) throws {
+    public func removeApprovedRecipient(email: String, account: String) throws {
         try db.write { db in
             try db.execute(
-                sql: "DELETE FROM approved_recipients WHERE email = ?",
-                arguments: [email]
+                sql: "DELETE FROM approved_recipients WHERE email = ? AND account_label = ?",
+                arguments: [email, account]
             )
         }
     }

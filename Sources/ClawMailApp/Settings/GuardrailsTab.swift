@@ -20,7 +20,7 @@ struct GuardrailsTab: View {
 
     @State private var firstTimeApproval = false
 
-    @State private var approvedRecipients: [(email: String, approvedAt: Date)] = []
+    @State private var approvedRecipients: [ApprovedRecipient] = []
 
     var body: some View {
         Form {
@@ -97,15 +97,20 @@ struct GuardrailsTab: View {
                 if firstTimeApproval && !approvedRecipients.isEmpty {
                     Text("Approved Recipients:")
                         .font(.headline)
-                    ForEach(approvedRecipients, id: \.email) { recipient in
+                    ForEach(approvedRecipients) { recipient in
                         HStack {
-                            Text(recipient.email)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(recipient.email)
+                                Text(recipient.accountLabel)
+                                    .foregroundStyle(.secondary)
+                                    .font(.caption)
+                            }
                             Spacer()
                             Text(recipient.approvedAt.formatted(date: .abbreviated, time: .shortened))
                                 .foregroundStyle(.secondary)
                                 .font(.caption)
                             Button(action: {
-                                removeApprovedRecipient(recipient.email)
+                                removeApprovedRecipient(recipient)
                             }) {
                                 Image(systemName: "trash")
                                     .foregroundStyle(.red)
@@ -195,10 +200,13 @@ struct GuardrailsTab: View {
         newBlockDomain = ""
     }
 
-    private func removeApprovedRecipient(_ email: String) {
+    private func removeApprovedRecipient(_ recipient: ApprovedRecipient) {
         Task {
-            try? await appState.orchestrator?.removeApprovedRecipient(email: email)
-            approvedRecipients.removeAll { $0.email == email }
+            try? await appState.orchestrator?.removeApprovedRecipient(
+                email: recipient.email,
+                account: recipient.accountLabel
+            )
+            approvedRecipients.removeAll { $0.id == recipient.id }
         }
     }
 }

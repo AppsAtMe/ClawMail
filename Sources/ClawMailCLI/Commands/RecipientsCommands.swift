@@ -79,6 +79,9 @@ struct RecipientsRemove: AsyncParsableCommand {
         abstract: "Remove an approved recipient"
     )
 
+    @Option(name: .long, help: "Account label")
+    var account: String
+
     @Argument(help: "Email address to remove")
     var email: String
 
@@ -90,6 +93,7 @@ struct RecipientsRemove: AsyncParsableCommand {
 
     func run() async throws {
         let params: [String: AnyCodableValue] = [
+            "account": .string(account),
             "email": .string(email),
         ]
         await executeRPC(socketPath: socketPath, method: "recipients.remove", params: params, format: format)

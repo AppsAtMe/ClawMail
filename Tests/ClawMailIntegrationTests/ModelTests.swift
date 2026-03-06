@@ -141,11 +141,35 @@ struct ModelTests {
         let approved = try index.listApprovedRecipients()
         #expect(approved.count == 1)
         #expect(approved.first?.email == "approved@example.com")
+        #expect(approved.first?.accountLabel == "test")
 
         // Remove
-        try index.removeApprovedRecipient(email: "approved@example.com")
+        try index.removeApprovedRecipient(email: "approved@example.com", account: "test")
         let removed = try index.listApprovedRecipients()
         #expect(removed.isEmpty)
+    }
+
+    @Test func approvedRecipientsAreScopedPerAccount() throws {
+        let db = try TestConfig.inMemoryDatabase()
+        let index = MetadataIndex(db: db)
+
+        try index.approveRecipient(email: "shared@example.com", account: "personal")
+        #expect(try index.isRecipientApproved(email: "shared@example.com", account: "personal"))
+        #expect(!(try index.isRecipientApproved(email: "shared@example.com", account: "work")))
+
+        try index.approveRecipient(email: "shared@example.com", account: "work")
+
+        let allRecipients = try index.listApprovedRecipients()
+        #expect(allRecipients.count == 2)
+        #expect(Set(allRecipients.map(\.accountLabel)) == Set(["personal", "work"]))
+
+        let personalRecipients = try index.listApprovedRecipients(account: "personal")
+        #expect(personalRecipients.count == 1)
+        #expect(personalRecipients.first?.accountLabel == "personal")
+
+        try index.removeApprovedRecipient(email: "shared@example.com", account: "personal")
+        #expect(!(try index.isRecipientApproved(email: "shared@example.com", account: "personal")))
+        #expect(try index.isRecipientApproved(email: "shared@example.com", account: "work"))
     }
 
     // MARK: - AnyCodableValue

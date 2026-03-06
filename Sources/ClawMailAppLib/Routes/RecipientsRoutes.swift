@@ -19,6 +19,7 @@ enum RecipientsRoutes {
                 let result = recipients.map { r in
                     [
                         "email": r.email,
+                        "account": r.accountLabel,
                         "approvedAt": ISO8601DateFormatter().string(from: r.approvedAt),
                     ]
                 }
@@ -53,8 +54,9 @@ enum RecipientsRoutes {
         group.delete { request, context -> Response in
             do {
                 let qp = request.uri.queryParameters
+                let account = try requireQueryParam(qp, "account")
                 let email = try requireQueryParam(qp, "email")
-                try await orchestrator.removeApprovedRecipient(email: email)
+                try await orchestrator.removeApprovedRecipient(email: email, account: account)
                 return jsonResponse(["success": true])
             } catch let error as ClawMailError {
                 return clawMailErrorResponse(error)

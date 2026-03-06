@@ -121,6 +121,15 @@ let package = Package(
             ]
         ),
         .testTarget(
+            name: "ClawMailAppTests",
+            dependencies: [
+                "ClawMailApp",
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
+        .testTarget(
             name: "ClawMailIntegrationTests",
             dependencies: ["ClawMailCore"],
             swiftSettings: [

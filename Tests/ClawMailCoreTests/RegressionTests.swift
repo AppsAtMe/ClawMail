@@ -360,6 +360,37 @@ struct RegressionTests {
         }
     }
 
+    @Test func guardrailApprovalIsScopedPerAccount() async throws {
+        let db = try Self.inMemoryDB()
+        let index = MetadataIndex(db: db)
+        let auditLog = AuditLog(db: db)
+
+        try index.approveRecipient(email: "known@example.com", account: "personal")
+
+        let config = GuardrailConfig(firstTimeRecipientApproval: true)
+        let engine = GuardrailEngine(
+            config: { config },
+            auditLog: auditLog,
+            metadataIndex: index
+        )
+
+        let recipients = [EmailAddress(name: "Known", email: "known@example.com")]
+
+        let personalResult = try await engine.checkSend(account: "personal", recipients: recipients)
+        if case .allowed = personalResult {
+            // Expected
+        } else {
+            Issue.record("Expected approval on personal account, got \(personalResult)")
+        }
+
+        let workResult = try await engine.checkSend(account: "work", recipients: recipients)
+        if case .pendingApproval(let emails) = workResult {
+            #expect(emails == ["known@example.com"])
+        } else {
+            Issue.record("Expected work account to require approval, got \(workResult)")
+        }
+    }
+
     @Test func guardrailSkipsApprovalWhenDisabled() async throws {
         let db = try Self.inMemoryDB()
         let index = MetadataIndex(db: db)

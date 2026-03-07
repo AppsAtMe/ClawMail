@@ -8,8 +8,7 @@ struct AccountsTab: View {
     private let appStateOverride: AppState?
     private let removeAccountAction: @MainActor (AppState, Account) async throws -> Void
     private let initialSelectedAccountId: UUID?
-    @State private var showingSetup = false
-    @State private var setupMode: AccountSetupMode = .add
+    @State private var setupController = SetupSheetController()
     @State private var showingDeleteConfirm = false
     @State private var errorState: UIErrorState?
 
@@ -93,8 +92,11 @@ struct AccountsTab: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .sheet(isPresented: $showingSetup) {
-            AccountSetupView(mode: setupMode)
+        .sheet(item: Binding(
+            get: { setupController.session },
+            set: { setupController.session = $0 }
+        )) { session in
+            AccountSetupView(mode: session.mode)
                 .environment(appState)
         }
         .alert("Remove Account", isPresented: $showingDeleteConfirm) {
@@ -160,9 +162,7 @@ struct AccountsTab: View {
     }
 
     private func presentSetupIfNeeded() {
-        guard appState.showAccountSetup, !showingSetup else { return }
-        appState.showAccountSetup = false
-        beginAddAccount()
+        setupController.presentQueuedAddIfNeeded(showAccountSetup: &appState.showAccountSetup)
     }
 
     private func ensureAccountSelection(preferred preferredID: UUID? = nil) {
@@ -170,14 +170,35 @@ struct AccountsTab: View {
     }
 
     private func beginAddAccount() {
-        setupMode = .add
-        showingSetup = true
+        setupController.presentAdd()
     }
 
     private func beginEditSelectedAccount() {
-        guard let selectedAccount else { return }
-        setupMode = .edit(selectedAccount)
-        showingSetup = true
+        setupController.presentEdit(account: selectedAccount)
+    }
+}
+
+internal struct SetupSheetSession: Identifiable, Equatable {
+    let id = UUID()
+    let mode: AccountSetupMode
+}
+
+internal struct SetupSheetController {
+    var session: SetupSheetSession?
+
+    mutating func presentQueuedAddIfNeeded(showAccountSetup: inout Bool) {
+        guard showAccountSetup, session == nil else { return }
+        showAccountSetup = false
+        presentAdd()
+    }
+
+    mutating func presentAdd() {
+        session = SetupSheetSession(mode: .add)
+    }
+
+    mutating func presentEdit(account: Account?) {
+        guard let account else { return }
+        session = SetupSheetSession(mode: .edit(account))
     }
 }
 

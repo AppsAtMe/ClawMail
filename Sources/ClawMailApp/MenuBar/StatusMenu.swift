@@ -5,6 +5,7 @@ import ClawMailCore
 struct StatusMenu: View {
     @Environment(AppState.self) private var appState
     @Environment(\.openSettings) private var openSettingsAction
+    @State private var quittingInProgress = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -52,10 +53,15 @@ struct StatusMenu: View {
                 .buttonStyle(.plain)
 
                 Button(action: quitApp) {
-                    actionRow("Quit ClawMail", systemImage: "power")
+                    if quittingInProgress {
+                        quittingActionRow
+                    } else {
+                        actionRow("Quit ClawMail", systemImage: "power")
+                    }
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut("q", modifiers: .command)
+                .disabled(quittingInProgress)
             }
         }
         .padding(14)
@@ -78,6 +84,9 @@ struct StatusMenu: View {
     }
 
     private func quitApp() {
+        guard !quittingInProgress else { return }
+        quittingInProgress = true
+
         // Use exit() as fallback if terminate hangs due to stuck NIO connections
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
             exit(0)
@@ -207,6 +216,24 @@ struct StatusMenu: View {
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(nsColor: .controlBackgroundColor))
+        )
+    }
+
+    private var quittingActionRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "power")
+                .foregroundStyle(.orange)
+            Text("Quitting...")
+                .foregroundStyle(.primary)
+            Spacer()
+            ProgressView()
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.orange.opacity(0.12))
         )
     }
 

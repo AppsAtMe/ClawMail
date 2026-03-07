@@ -34,10 +34,15 @@ public actor OAuthCallbackServer {
         let bootstrap = ServerBootstrap(group: group)
             .serverChannelOption(.backlog, value: 4)
             .childChannelInitializer { channel in
-                channel.pipeline.addHandler(ByteToMessageHandler(HTTPRequestDecoder())).flatMap {
-                    channel.pipeline.addHandler(HTTPResponseEncoder())
-                }.flatMap {
-                    channel.pipeline.addHandler(handler)
+                do {
+                    try channel.pipeline.syncOperations.addHandlers(
+                        ByteToMessageHandler(HTTPRequestDecoder()),
+                        HTTPResponseEncoder(),
+                        handler
+                    )
+                    return channel.eventLoop.makeSucceededVoidFuture()
+                } catch {
+                    return channel.eventLoop.makeFailedFuture(error)
                 }
             }
 

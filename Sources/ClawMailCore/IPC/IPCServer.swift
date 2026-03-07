@@ -174,8 +174,14 @@ public final class IPCServer: Sendable {
             .childChannelInitializer { channel in
                 // New handler per connection — each gets its own authenticated state
                 let handler = IPCServerHandler(orchestrator: orchestratorRef, server: serverRef)
-                return channel.pipeline.addHandler(ByteToMessageHandler(NewlineFrameDecoder())).flatMap {
-                    channel.pipeline.addHandler(handler)
+                do {
+                    try channel.pipeline.syncOperations.addHandlers(
+                        ByteToMessageHandler(NewlineFrameDecoder()),
+                        handler
+                    )
+                    return channel.eventLoop.makeSucceededVoidFuture()
+                } catch {
+                    return channel.eventLoop.makeFailedFuture(error)
                 }
             }
 

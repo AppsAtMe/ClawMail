@@ -409,17 +409,16 @@ public actor IMAPClient {
             .connectTimeout(.seconds(15))
             .channelOption(.socketOption(.so_reuseaddr), value: 1)
             .channelInitializer { channel in
-                var handlers: [any ChannelHandler] = []
-                if let ctx = sslContext {
-                    do {
+                do {
+                    if let ctx = sslContext {
                         let sslHandler = try NIOSSLClientHandler(context: ctx, serverHostname: hostname)
-                        handlers.append(sslHandler)
-                    } catch {
-                        return channel.eventLoop.makeFailedFuture(error)
+                        try channel.pipeline.syncOperations.addHandler(sslHandler)
                     }
+                    try channel.pipeline.syncOperations.addHandler(handler)
+                    return channel.eventLoop.makeSucceededVoidFuture()
+                } catch {
+                    return channel.eventLoop.makeFailedFuture(error)
                 }
-                handlers.append(handler)
-                return channel.pipeline.addHandlers(handlers)
             }
 
         do {
@@ -459,8 +458,17 @@ public actor IMAPClient {
         config.trustRoots = .default
         let sslContext = try NIOSSLContext(configuration: config)
         let sslHandler = try NIOSSLClientHandler(context: sslContext, serverHostname: host)
+        try await addHandlerOnEventLoop(sslHandler, to: channel, position: .first).get()
+    }
 
-        try await channel.pipeline.addHandler(sslHandler, position: .first).get()
+    private func addHandlerOnEventLoop(
+        _ handler: ChannelHandler,
+        to channel: Channel,
+        position: ChannelPipeline.SynchronousOperations.Position = .last
+    ) -> EventLoopFuture<Void> {
+        channel.eventLoop.assumeIsolatedUnsafeUnchecked().submit {
+            try channel.pipeline.syncOperations.addHandler(handler, position: position)
+        }
     }
 
     /// Authenticate using LOGIN or XOAUTH2.

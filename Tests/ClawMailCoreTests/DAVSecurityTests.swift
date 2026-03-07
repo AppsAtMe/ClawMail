@@ -172,6 +172,387 @@ struct DAVSecurityTests {
         #expect(requests.allSatisfy { $0.url?.host == "calendar.example.com" })
     }
 
+    @Test func calDAVAcceptsHomeSetOnRedirectedEffectiveOrigin() async throws {
+        let session = makeSession()
+        let redirectedPrincipalURL = URL(string: "https://p42-caldav.icloud.com/123456/principal/")!
+        let redirectedHomeURL = URL(string: "https://p42-caldav.icloud.com/123456/calendars/")!
+
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "caldav.icloud.com")
+            return self.response(
+                url: redirectedPrincipalURL,
+                body: self.multistatusBody(
+                    property: "current-user-principal",
+                    href: "/123456/principal/"
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "p42-caldav.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "calendar-home-set",
+                    href: redirectedHomeURL.absoluteString
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "p42-caldav.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+                  <d:response>
+                    <d:href>/123456/calendars/work/</d:href>
+                    <d:propstat>
+                      <d:prop>
+                        <d:displayname>Work</d:displayname>
+                        <d:resourcetype>
+                          <d:collection/>
+                          <c:calendar/>
+                        </d:resourcetype>
+                        <c:supported-calendar-component-set>
+                          <c:comp name="VEVENT"/>
+                        </c:supported-calendar-component-set>
+                      </d:prop>
+                      <d:status>HTTP/1.1 200 OK</d:status>
+                    </d:propstat>
+                  </d:response>
+                </d:multistatus>
+                """
+            )
+        }
+
+        let client = try CalDAVClient(
+            baseURL: URL(string: "https://caldav.icloud.com")!,
+            credential: .password(username: "user", password: "pass"),
+            session: session
+        )
+
+        let calendars = try await client.listCalendars()
+        #expect(calendars.count == 1)
+        #expect(calendars.first?.href == "/123456/calendars/work")
+
+        let requestHosts = MockDAVURLProtocol.recordedRequests().compactMap { $0.url?.host }
+        #expect(requestHosts == ["caldav.icloud.com", "p42-caldav.icloud.com", "p42-caldav.icloud.com"])
+    }
+
+    @Test func cardDAVAcceptsHomeSetOnRedirectedEffectiveOrigin() async throws {
+        let session = makeSession()
+        let redirectedPrincipalURL = URL(string: "https://p42-contacts.icloud.com/123456/principal/")!
+        let redirectedHomeURL = URL(string: "https://p42-contacts.icloud.com/123456/addressbooks/")!
+
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "contacts.icloud.com")
+            return self.response(
+                url: redirectedPrincipalURL,
+                body: self.multistatusBody(
+                    property: "current-user-principal",
+                    href: "/123456/principal/"
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "p42-contacts.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "addressbook-home-set",
+                    href: redirectedHomeURL.absoluteString
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "p42-contacts.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <d:multistatus xmlns:d="DAV:">
+                  <d:response>
+                    <d:href>/123456/addressbooks/default/</d:href>
+                    <d:propstat>
+                      <d:prop>
+                        <d:displayname>Default</d:displayname>
+                        <d:resourcetype>
+                          <d:collection/>
+                          <card:addressbook xmlns:card="urn:ietf:params:xml:ns:carddav"/>
+                        </d:resourcetype>
+                      </d:prop>
+                      <d:status>HTTP/1.1 200 OK</d:status>
+                    </d:propstat>
+                  </d:response>
+                </d:multistatus>
+                """
+            )
+        }
+
+        let client = try CardDAVClient(
+            baseURL: URL(string: "https://contacts.icloud.com")!,
+            credential: .password(username: "user", password: "pass"),
+            session: session
+        )
+
+        let books = try await client.listAddressBooks()
+        #expect(books.count == 1)
+        #expect(books.first?.href == "/123456/addressbooks/default")
+
+        let requestHosts = MockDAVURLProtocol.recordedRequests().compactMap { $0.url?.host }
+        #expect(requestHosts == ["contacts.icloud.com", "p42-contacts.icloud.com", "p42-contacts.icloud.com"])
+    }
+
+    @Test func calDAVAcceptsAppleShardHomeSetWithoutHTTPRedirect() async throws {
+        let session = makeSession()
+
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "caldav.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "current-user-principal",
+                    href: "/123456/principal/"
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "caldav.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "calendar-home-set",
+                    href: "https://p42-caldav.icloud.com/123456/calendars/"
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "p42-caldav.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+                  <d:response>
+                    <d:href>/123456/calendars/work/</d:href>
+                    <d:propstat>
+                      <d:prop>
+                        <d:displayname>Work</d:displayname>
+                        <d:resourcetype>
+                          <d:collection/>
+                          <c:calendar/>
+                        </d:resourcetype>
+                        <c:supported-calendar-component-set>
+                          <c:comp name="VEVENT"/>
+                        </c:supported-calendar-component-set>
+                      </d:prop>
+                      <d:status>HTTP/1.1 200 OK</d:status>
+                    </d:propstat>
+                  </d:response>
+                </d:multistatus>
+                """
+            )
+        }
+
+        let client = try CalDAVClient(
+            baseURL: URL(string: "https://caldav.icloud.com")!,
+            credential: .password(username: "user", password: "pass"),
+            session: session
+        )
+
+        let calendars = try await client.listCalendars()
+        #expect(calendars.count == 1)
+
+        let requestHosts = MockDAVURLProtocol.recordedRequests().compactMap { $0.url?.host }
+        #expect(requestHosts == ["caldav.icloud.com", "caldav.icloud.com", "p42-caldav.icloud.com"])
+    }
+
+    @Test func cardDAVAcceptsAppleShardHomeSetWithoutHTTPRedirect() async throws {
+        let session = makeSession()
+
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "contacts.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "current-user-principal",
+                    href: "/123456/principal/"
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "contacts.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "addressbook-home-set",
+                    href: "https://p42-contacts.icloud.com/123456/addressbooks/"
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "p42-contacts.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <d:multistatus xmlns:d="DAV:">
+                  <d:response>
+                    <d:href>/123456/addressbooks/default/</d:href>
+                    <d:propstat>
+                      <d:prop>
+                        <d:displayname>Default</d:displayname>
+                        <d:resourcetype>
+                          <d:collection/>
+                          <card:addressbook xmlns:card="urn:ietf:params:xml:ns:carddav"/>
+                        </d:resourcetype>
+                      </d:prop>
+                      <d:status>HTTP/1.1 200 OK</d:status>
+                    </d:propstat>
+                  </d:response>
+                </d:multistatus>
+                """
+            )
+        }
+
+        let client = try CardDAVClient(
+            baseURL: URL(string: "https://contacts.icloud.com")!,
+            credential: .password(username: "user", password: "pass"),
+            session: session
+        )
+
+        let books = try await client.listAddressBooks()
+        #expect(books.count == 1)
+
+        let requestHosts = MockDAVURLProtocol.recordedRequests().compactMap { $0.url?.host }
+        #expect(requestHosts == ["contacts.icloud.com", "contacts.icloud.com", "p42-contacts.icloud.com"])
+    }
+
+    @Test func calDAVAcceptsAppleCalendarWSHomeSetWithoutHTTPRedirect() async throws {
+        let session = makeSession()
+
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "caldav.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "current-user-principal",
+                    href: "/123456/principal/"
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "caldav.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "calendar-home-set",
+                    href: "https://p42-calendarws.icloud.com/123456/calendars/"
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "p42-calendarws.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+                  <d:response>
+                    <d:href>/123456/calendars/work/</d:href>
+                    <d:propstat>
+                      <d:prop>
+                        <d:displayname>Work</d:displayname>
+                        <d:resourcetype>
+                          <d:collection/>
+                          <c:calendar/>
+                        </d:resourcetype>
+                        <c:supported-calendar-component-set>
+                          <c:comp name="VEVENT"/>
+                        </c:supported-calendar-component-set>
+                      </d:prop>
+                      <d:status>HTTP/1.1 200 OK</d:status>
+                    </d:propstat>
+                  </d:response>
+                </d:multistatus>
+                """
+            )
+        }
+
+        let client = try CalDAVClient(
+            baseURL: URL(string: "https://caldav.icloud.com")!,
+            credential: .password(username: "user", password: "pass"),
+            session: session
+        )
+
+        let calendars = try await client.listCalendars()
+        #expect(calendars.count == 1)
+
+        let requestHosts = MockDAVURLProtocol.recordedRequests().compactMap { $0.url?.host }
+        #expect(requestHosts == ["caldav.icloud.com", "caldav.icloud.com", "p42-calendarws.icloud.com"])
+    }
+
+    @Test func cardDAVAcceptsAppleContactsWSHomeSetWithoutHTTPRedirect() async throws {
+        let session = makeSession()
+
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "contacts.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "current-user-principal",
+                    href: "/123456/principal/"
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "contacts.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "addressbook-home-set",
+                    href: "https://p42-contactsws.icloud.com/123456/addressbooks/"
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "p42-contactsws.icloud.com")
+            return self.response(
+                url: request.url!,
+                body: """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <d:multistatus xmlns:d="DAV:">
+                  <d:response>
+                    <d:href>/123456/addressbooks/default/</d:href>
+                    <d:propstat>
+                      <d:prop>
+                        <d:displayname>Default</d:displayname>
+                        <d:resourcetype>
+                          <d:collection/>
+                          <card:addressbook xmlns:card="urn:ietf:params:xml:ns:carddav"/>
+                        </d:resourcetype>
+                      </d:prop>
+                      <d:status>HTTP/1.1 200 OK</d:status>
+                    </d:propstat>
+                  </d:response>
+                </d:multistatus>
+                """
+            )
+        }
+
+        let client = try CardDAVClient(
+            baseURL: URL(string: "https://contacts.icloud.com")!,
+            credential: .password(username: "user", password: "pass"),
+            session: session
+        )
+
+        let books = try await client.listAddressBooks()
+        #expect(books.count == 1)
+
+        let requestHosts = MockDAVURLProtocol.recordedRequests().compactMap { $0.url?.host }
+        #expect(requestHosts == ["contacts.icloud.com", "contacts.icloud.com", "p42-contactsws.icloud.com"])
+    }
+
     private func makeSession() -> URLSession {
         MockDAVURLProtocol.reset()
         let configuration = URLSessionConfiguration.ephemeral

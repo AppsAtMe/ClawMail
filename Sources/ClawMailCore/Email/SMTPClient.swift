@@ -139,22 +139,19 @@ public actor SMTPClient {
             .connectTimeout(.seconds(15))
             .channelOption(.socketOption(.so_reuseaddr), value: 1)
             .channelInitializer { channel in
-                // Build pipeline: [SSL (optional)] → LineDecoder → ResponseHandler
-                let addSSL: EventLoopFuture<Void>
-                if let ctx = sslContext {
-                    do {
+                do {
+                    // Build pipeline: [SSL (optional)] -> LineDecoder -> ResponseHandler
+                    if let ctx = sslContext {
                         let sslHandler = try NIOSSLClientHandler(context: ctx, serverHostname: smtpHost)
-                        addSSL = channel.pipeline.addHandler(sslHandler)
-                    } catch {
-                        return channel.eventLoop.makeFailedFuture(error)
+                        try channel.pipeline.syncOperations.addHandler(sslHandler)
                     }
-                } else {
-                    addSSL = channel.eventLoop.makeSucceededVoidFuture()
-                }
-                return addSSL.flatMap {
-                    channel.pipeline.addHandler(ByteToMessageHandler(SMTPLineHandler()))
-                }.flatMap {
-                    channel.pipeline.addHandler(SMTPResponseHandler(queue: queue))
+                    try channel.pipeline.syncOperations.addHandlers(
+                        ByteToMessageHandler(SMTPLineHandler()),
+                        SMTPResponseHandler(queue: queue)
+                    )
+                    return channel.eventLoop.makeSucceededVoidFuture()
+                } catch {
+                    return channel.eventLoop.makeFailedFuture(error)
                 }
             }
 
@@ -187,7 +184,7 @@ public actor SMTPClient {
                 starttlsConfig.trustRoots = .default
                 let tlsContext = try NIOSSLContext(configuration: starttlsConfig)
                 let sslHandler = try NIOSSLClientHandler(context: tlsContext, serverHostname: host)
-                try await channel.pipeline.addHandler(sslHandler, position: .first).get()
+                try await addHandlerOnEventLoop(sslHandler, to: channel, position: .first).get()
 
                 // Re-EHLO after STARTTLS
                 try await sendCommand("EHLO clawmail.local")
@@ -200,6 +197,16 @@ public actor SMTPClient {
             throw error
         } catch {
             throw ClawMailError.connectionError("SMTP: \(String(describing: error))")
+        }
+    }
+
+    private func addHandlerOnEventLoop(
+        _ handler: ChannelHandler,
+        to channel: Channel,
+        position: ChannelPipeline.SynchronousOperations.Position = .last
+    ) -> EventLoopFuture<Void> {
+        channel.eventLoop.assumeIsolatedUnsafeUnchecked().submit {
+            try channel.pipeline.syncOperations.addHandler(handler, position: position)
         }
     }
 

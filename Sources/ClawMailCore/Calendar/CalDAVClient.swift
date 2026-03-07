@@ -49,17 +49,18 @@ public actor CalDAVClient {
 
     // MARK: - Properties
 
-    private let baseURL: URL
     private let credential: CalDAVCredential
     private let session: URLSession
+    private var serverURL: URL
     private var calendarHomePath: String?
 
     // MARK: - Initialization
 
     public init(baseURL: URL, credential: CalDAVCredential, session: URLSession? = nil) throws {
-        self.baseURL = try DAVURLValidator.validateConfiguredURL(baseURL, serviceName: "CalDAV")
+        let validatedBaseURL = try DAVURLValidator.validateConfiguredURL(baseURL, serviceName: "CalDAV")
         self.credential = credential
         self.session = session ?? URLSession.shared
+        self.serverURL = validatedBaseURL
     }
 
     // MARK: - Discovery
@@ -104,7 +105,7 @@ public actor CalDAVClient {
 
     /// Test authentication by performing a basic PROPFIND on the base URL.
     public func authenticate() async throws {
-        var request = URLRequest(url: baseURL)
+        var request = URLRequest(url: serverURL)
         request.httpMethod = "PROPFIND"
         request.setValue("0", forHTTPHeaderField: "Depth")
         request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
@@ -114,6 +115,7 @@ public actor CalDAVClient {
         request.httpBody = body.data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ClawMailError.connectionError("Invalid response from CalDAV server")
         }
@@ -155,6 +157,7 @@ public actor CalDAVClient {
         request.httpBody = body.data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "listCalendars")
 
         let responses = WebDAVResponseParser.parse(data: data)
@@ -196,6 +199,7 @@ public actor CalDAVClient {
         request.httpBody = body.data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "getEvents")
 
         let responses = WebDAVResponseParser.parse(data: data)
@@ -213,6 +217,7 @@ public actor CalDAVClient {
         request.httpBody = WebDAVXMLBuilder.calendarUIDQuery(componentType: "VEVENT", uid: uid).data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "findEvent")
 
         let responses = WebDAVResponseParser.parse(data: data)
@@ -239,6 +244,7 @@ public actor CalDAVClient {
         request.httpBody = icalendar.data(using: .utf8)
 
         let (_, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "createEvent", allowedCodes: [201, 204])
 
         return resourcePath
@@ -260,6 +266,7 @@ public actor CalDAVClient {
         request.httpBody = icalendar.data(using: .utf8)
 
         let (_, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "updateEvent", allowedCodes: [200, 201, 204])
     }
 
@@ -277,6 +284,7 @@ public actor CalDAVClient {
         try await applyAuth(to: &request)
 
         let (_, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "deleteEvent", allowedCodes: [200, 204])
     }
 
@@ -302,6 +310,7 @@ public actor CalDAVClient {
         request.httpBody = body.data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "getTasks")
 
         let responses = WebDAVResponseParser.parse(data: data)
@@ -323,6 +332,7 @@ public actor CalDAVClient {
         ).data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "findTask")
 
         let responses = WebDAVResponseParser.parse(data: data)
@@ -349,6 +359,7 @@ public actor CalDAVClient {
         request.httpBody = icalendar.data(using: .utf8)
 
         let (_, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "createTask", allowedCodes: [201, 204])
 
         return resourcePath
@@ -370,6 +381,7 @@ public actor CalDAVClient {
         request.httpBody = icalendar.data(using: .utf8)
 
         let (_, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "updateTask", allowedCodes: [200, 201, 204])
     }
 
@@ -387,6 +399,7 @@ public actor CalDAVClient {
         try await applyAuth(to: &request)
 
         let (_, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "deleteTask", allowedCodes: [200, 204])
     }
 
@@ -422,6 +435,11 @@ public actor CalDAVClient {
         }
     }
 
+    private func updateServerURL(from response: URLResponse) throws {
+        guard let effectiveURL = response.url else { return }
+        serverURL = try DAVURLValidator.validateConfiguredURL(effectiveURL, serviceName: "CalDAV")
+    }
+
     private func discoverCalendarHome(principalPath: String) async throws {
         let principalURL = try resolveServerURL(principalPath, context: "discoverCalendarHome principal")
 
@@ -434,11 +452,12 @@ public actor CalDAVClient {
         let body = WebDAVXMLBuilder.propfind(properties: ["c:calendar-home-set"])
         request.httpBody = body.data(using: .utf8)
 
-        let (data, _) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         let responses = WebDAVResponseParser.parse(data: data)
         if let home = responses.first?.properties["calendar-home-set"] {
             let homeURL = try resolveServerURL(home, context: "discoverCalendarHome home-set")
-            self.calendarHomePath = homeURL.path
+            self.calendarHomePath = storedServerReference(for: homeURL)
         }
     }
 
@@ -449,16 +468,23 @@ public actor CalDAVClient {
         // If we don't have a calendar home yet, try to discover it
         try await authenticate()
         // If still no calendar home, use the base URL path
-        return try resolveServerURL(calendarHomePath ?? baseURL.path, context: "resolveCalendarHome")
+        return try resolveServerURL(calendarHomePath ?? serverURL.path, context: "resolveCalendarHome")
     }
 
     private func resolveServerURL(_ path: String, context: String) throws -> URL {
         try DAVURLValidator.resolveServerURL(
             path,
-            relativeTo: baseURL,
+            relativeTo: serverURL,
             serviceName: "CalDAV",
             context: context
         )
+    }
+
+    private func storedServerReference(for url: URL) -> String {
+        if url.host?.lowercased() != serverURL.host?.lowercased() {
+            return url.absoluteString
+        }
+        return url.path
     }
 }
 

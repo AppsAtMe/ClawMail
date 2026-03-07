@@ -45,8 +45,14 @@ public final class IPCClient: @unchecked Sendable {
 
         let bootstrap = ClientBootstrap(group: group)
             .channelInitializer { channel in
-                channel.pipeline.addHandler(ByteToMessageHandler(NewlineFrameDecoder())).flatMap {
-                    channel.pipeline.addHandler(handler)
+                do {
+                    try channel.pipeline.syncOperations.addHandlers(
+                        ByteToMessageHandler(NewlineFrameDecoder()),
+                        handler
+                    )
+                    return channel.eventLoop.makeSucceededVoidFuture()
+                } catch {
+                    return channel.eventLoop.makeFailedFuture(error)
                 }
             }
 

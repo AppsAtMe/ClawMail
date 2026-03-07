@@ -37,17 +37,18 @@ public actor CardDAVClient {
 
     // MARK: - Properties
 
-    private let baseURL: URL
     private let credential: CardDAVCredential
     private let session: URLSession
+    private var serverURL: URL
     private var addressBookHomePath: String?
 
     // MARK: - Initialization
 
     public init(baseURL: URL, credential: CardDAVCredential, session: URLSession? = nil) throws {
-        self.baseURL = try DAVURLValidator.validateConfiguredURL(baseURL, serviceName: "CardDAV")
+        let validatedBaseURL = try DAVURLValidator.validateConfiguredURL(baseURL, serviceName: "CardDAV")
         self.credential = credential
         self.session = session ?? URLSession.shared
+        self.serverURL = validatedBaseURL
     }
 
     // MARK: - Discovery
@@ -89,7 +90,7 @@ public actor CardDAVClient {
 
     /// Test authentication by performing a PROPFIND on the base URL.
     public func authenticate() async throws {
-        var request = URLRequest(url: baseURL)
+        var request = URLRequest(url: serverURL)
         request.httpMethod = "PROPFIND"
         request.setValue("0", forHTTPHeaderField: "Depth")
         request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
@@ -99,6 +100,7 @@ public actor CardDAVClient {
         request.httpBody = body.data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ClawMailError.connectionError("Invalid response from CardDAV server")
         }
@@ -137,6 +139,7 @@ public actor CardDAVClient {
         request.httpBody = body.data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "listAddressBooks")
 
         let responses = CardDAVResponseParser.parse(data: data)
@@ -175,6 +178,7 @@ public actor CardDAVClient {
         request.httpBody = body.data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "getContacts")
 
         let responses = CardDAVResponseParser.parse(data: data)
@@ -192,6 +196,7 @@ public actor CardDAVClient {
         request.httpBody = CardDAVXMLBuilder.addressbookUIDQuery(uid: uid).data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "findContact")
 
         let responses = CardDAVResponseParser.parse(data: data)
@@ -218,6 +223,7 @@ public actor CardDAVClient {
         request.httpBody = vcard.data(using: .utf8)
 
         let (_, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "createContact", allowedCodes: [201, 204])
 
         return resourcePath
@@ -239,6 +245,7 @@ public actor CardDAVClient {
         request.httpBody = vcard.data(using: .utf8)
 
         let (_, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "updateContact", allowedCodes: [200, 201, 204])
     }
 
@@ -256,6 +263,7 @@ public actor CardDAVClient {
         try await applyAuth(to: &request)
 
         let (_, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         try validateResponse(response, context: "deleteContact", allowedCodes: [200, 204])
     }
 
@@ -291,6 +299,11 @@ public actor CardDAVClient {
         }
     }
 
+    private func updateServerURL(from response: URLResponse) throws {
+        guard let effectiveURL = response.url else { return }
+        serverURL = try DAVURLValidator.validateConfiguredURL(effectiveURL, serviceName: "CardDAV")
+    }
+
     private func discoverAddressBookHome(principalPath: String) async throws {
         let principalURL = try resolveServerURL(principalPath, context: "discoverAddressBookHome principal")
 
@@ -303,11 +316,12 @@ public actor CardDAVClient {
         let body = CardDAVXMLBuilder.propfind(properties: ["card:addressbook-home-set"])
         request.httpBody = body.data(using: .utf8)
 
-        let (data, _) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
+        try updateServerURL(from: response)
         let responses = CardDAVResponseParser.parse(data: data)
         if let home = responses.first?.properties["addressbook-home-set"] {
             let homeURL = try resolveServerURL(home, context: "discoverAddressBookHome home-set")
-            self.addressBookHomePath = homeURL.path
+            self.addressBookHomePath = storedServerReference(for: homeURL)
         }
     }
 
@@ -316,16 +330,23 @@ public actor CardDAVClient {
             return try resolveServerURL(home, context: "resolveAddressBookHome")
         }
         try await authenticate()
-        return try resolveServerURL(addressBookHomePath ?? baseURL.path, context: "resolveAddressBookHome")
+        return try resolveServerURL(addressBookHomePath ?? serverURL.path, context: "resolveAddressBookHome")
     }
 
     private func resolveServerURL(_ path: String, context: String) throws -> URL {
         try DAVURLValidator.resolveServerURL(
             path,
-            relativeTo: baseURL,
+            relativeTo: serverURL,
             serviceName: "CardDAV",
             context: context
         )
+    }
+
+    private func storedServerReference(for url: URL) -> String {
+        if url.host?.lowercased() != serverURL.host?.lowercased() {
+            return url.absoluteString
+        }
+        return url.path
     }
 }
 

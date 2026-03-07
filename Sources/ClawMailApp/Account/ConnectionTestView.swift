@@ -43,62 +43,76 @@ struct ConnectionTestView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Connection Test")
-                .font(.title2.bold())
+            VStack(spacing: 6) {
+                Text("Connection Test")
+                    .font(.title2.bold())
 
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(results) { result in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: result.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundStyle(result.passed ? .green : .red)
-                                .padding(.top, 1)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(result.service)
-                                    .font(.headline)
-                                Text(result.message)
-                                    .foregroundStyle(.secondary)
-                                    .font(.caption)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .textSelection(.enabled)
-                                if let recoverySuggestion = result.recoverySuggestion {
-                                    Text(recoverySuggestion.text)
-                                        .font(.caption)
-                                        .foregroundStyle(.primary)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .textSelection(.enabled)
-                                    if let linkURL = recoverySuggestion.linkURL {
-                                        Link(recoverySuggestion.linkTitle ?? linkURL.absoluteString, destination: linkURL)
-                                            .font(.caption)
-                                    }
-                                }
-                            }
-                            Spacer(minLength: 12)
-                            Text(result.passed ? "Connected" : "Failed")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(result.passed ? .green : .red)
-                        }
-
-                        if result.id != results.last?.id {
-                            Divider()
-                        }
-                    }
-                }
-
-                if inProgress {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Testing...")
-                            .foregroundStyle(.secondary)
-                    }
+                if !results.isEmpty, !results.allSatisfy(\.passed) {
+                    Text("Review the failures below, then use Back to adjust settings or Retry to run the checks again.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(results) { result in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: result.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .foregroundStyle(result.passed ? .green : .red)
+                                    .padding(.top, 1)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(result.service)
+                                        .font(.headline)
+                                    Text(result.message)
+                                        .foregroundStyle(.secondary)
+                                        .font(.caption)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .textSelection(.enabled)
+                                    if let recoverySuggestion = result.recoverySuggestion {
+                                        Text(recoverySuggestion.text)
+                                            .font(.caption)
+                                            .foregroundStyle(.primary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .textSelection(.enabled)
+                                        if let linkURL = recoverySuggestion.linkURL {
+                                            Link(recoverySuggestion.linkTitle ?? linkURL.absoluteString, destination: linkURL)
+                                                .font(.caption)
+                                        }
+                                    }
+                                }
+                                Spacer(minLength: 12)
+                                Text(result.passed ? "Connected" : "Failed")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(result.passed ? .green : .red)
+                            }
+
+                            if result.id != results.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
+
+                    if inProgress {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Testing...")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+            }
             .background(Color(nsColor: .controlBackgroundColor))
             .cornerRadius(8)
         }
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: results.isEmpty) {
             if results.isEmpty && !inProgress {
                 runTests()

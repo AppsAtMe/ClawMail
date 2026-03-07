@@ -148,6 +148,155 @@ enum AccountSetupMode: Equatable {
     }
 }
 
+enum AccountSetupCredentialStatus: Equatable {
+    case loadingSavedPassword
+    case savedPasswordReady
+    case missingSavedPassword
+    case newPasswordWillReplace
+    case loadingSavedOAuth
+    case savedOAuthReady
+    case missingSavedOAuth
+    case newOAuthReady
+    case passwordRequired
+    case browserSignInRequired
+
+    var icon: String {
+        switch self {
+        case .loadingSavedPassword, .loadingSavedOAuth:
+            return "hourglass"
+        case .savedPasswordReady, .savedOAuthReady, .newPasswordWillReplace, .newOAuthReady:
+            return "checkmark.circle.fill"
+        case .missingSavedPassword, .missingSavedOAuth, .passwordRequired, .browserSignInRequired:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .loadingSavedPassword, .loadingSavedOAuth:
+            return .orange
+        case .savedPasswordReady, .savedOAuthReady, .newPasswordWillReplace, .newOAuthReady:
+            return .green
+        case .missingSavedPassword, .missingSavedOAuth, .passwordRequired, .browserSignInRequired:
+            return .red
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .loadingSavedPassword:
+            return "Loading the saved password for this account."
+        case .savedPasswordReady:
+            return "Saved password ready. Leave the password blank to keep using it for connection tests and the update."
+        case .missingSavedPassword:
+            return "No saved password was available. Enter a password before you test and update this account."
+        case .newPasswordWillReplace:
+            return "A new password is ready and will replace the current saved password when you update the account."
+        case .loadingSavedOAuth:
+            return "Loading the saved browser sign-in for this account."
+        case .savedOAuthReady:
+            return "Saved browser sign-in ready. You can retest and update without signing in again."
+        case .missingSavedOAuth:
+            return "No saved browser sign-in was available. Complete browser sign-in again before you test and update this account."
+        case .newOAuthReady:
+            return "A fresh browser sign-in is ready and will replace the current saved sign-in when you update the account."
+        case .passwordRequired:
+            return "Enter a password for this provider before you test and update the account."
+        case .browserSignInRequired:
+            return "Complete browser sign-in for this provider before you test and update the account."
+        }
+    }
+}
+
+struct AccountSetupCredentialState {
+    let existingAccount: Account?
+    let provider: ProviderChoice
+    let enteredPassword: String
+    let enteredOAuthTokens: OAuthTokens?
+    let storedPassword: String?
+    let storedOAuthTokens: OAuthTokens?
+    let storedCredentialsDidLoad: Bool
+
+    var passwordCredentialsReady: Bool {
+        if !enteredPassword.isEmpty {
+            return true
+        }
+
+        guard existingPasswordAuthMatches else { return false }
+        return storedCredentialsDidLoad && storedPassword != nil
+    }
+
+    var oauthCredentialsReady: Bool {
+        if enteredOAuthTokens != nil {
+            return true
+        }
+
+        guard existingOAuthAuthMatches else { return false }
+        return storedCredentialsDidLoad && storedOAuthTokens != nil
+    }
+
+    var connectionTestAuthMaterial: ConnectionTestAuthMaterial {
+        if let enteredOAuthTokens {
+            return .oauth2(enteredOAuthTokens)
+        }
+
+        if existingOAuthAuthMatches, let storedOAuthTokens {
+            return .oauth2(storedOAuthTokens)
+        }
+
+        if !enteredPassword.isEmpty {
+            return .password(enteredPassword)
+        }
+
+        if existingPasswordAuthMatches, let storedPassword {
+            return .password(storedPassword)
+        }
+
+        return .password(enteredPassword)
+    }
+
+    var editCredentialStatus: AccountSetupCredentialStatus? {
+        guard existingAccount != nil else { return nil }
+
+        if provider.usesOAuth {
+            if enteredOAuthTokens != nil {
+                return .newOAuthReady
+            }
+            if existingOAuthAuthMatches {
+                guard storedCredentialsDidLoad else { return .loadingSavedOAuth }
+                return storedOAuthTokens == nil ? .missingSavedOAuth : .savedOAuthReady
+            }
+            return .browserSignInRequired
+        }
+
+        if !enteredPassword.isEmpty {
+            return .newPasswordWillReplace
+        }
+        if existingPasswordAuthMatches {
+            guard storedCredentialsDidLoad else { return .loadingSavedPassword }
+            return storedPassword == nil ? .missingSavedPassword : .savedPasswordReady
+        }
+        return .passwordRequired
+    }
+
+    private var existingPasswordAuthMatches: Bool {
+        guard !provider.usesOAuth, let existingAccount else { return false }
+        if case .password = existingAccount.authMethod {
+            return true
+        }
+        return false
+    }
+
+    private var existingOAuthAuthMatches: Bool {
+        guard let existingAccount,
+              let provider = provider.oauthProvider,
+              case .oauth2(let existingProvider) = existingAccount.authMethod else {
+            return false
+        }
+        return existingProvider == provider
+    }
+}
+
 // MARK: - Account Setup View
 
 struct AccountSetupView: View {
@@ -176,6 +325,7 @@ struct AccountSetupView: View {
     @State private var oauthTokens: OAuthTokens?
     @State private var storedPassword: String?
     @State private var storedOAuthTokens: OAuthTokens?
+    @State private var storedCredentialsDidLoad = false
     @State private var saveError: String?
     @State private var saveInProgress = false
 
@@ -253,8 +403,9 @@ struct AccountSetupView: View {
             )
         case .credentials:
             CredentialsFormView(
+                mode: mode,
                 provider: provider,
-                isEditing: mode.isEditing,
+                credentialStatus: credentialState.editCredentialStatus,
                 emailAddress: $emailAddress,
                 displayName: $displayName,
                 imapHost: $imapHost,
@@ -313,7 +464,7 @@ struct AccountSetupView: View {
                 .disabled(saveInProgress)
             Spacer()
             if step.rawValue > 0 && step != .done {
-                Button("Back") {
+                Button(backButtonTitle) {
                     step = SetupStep(rawValue: step.rawValue - 1)!
                 }
                 .disabled(testInProgress || saveInProgress)
@@ -332,6 +483,13 @@ struct AccountSetupView: View {
 
     // MARK: - Navigation Logic
 
+    private var backButtonTitle: String {
+        if mode.isEditing && step == .credentials {
+            return "Change Provider"
+        }
+        return "Back"
+    }
+
     private var nextButtonTitle: String {
         switch step {
         case .provider: return "Next"
@@ -340,7 +498,7 @@ struct AccountSetupView: View {
             if testsPassed {
                 return mode.isEditing ? (saveInProgress ? "Updating..." : "Update Account") : "Next"
             }
-            return "Retry"
+            return "Retry Test"
         case .label: return saveInProgress ? "Adding..." : "Add Account"
         case .done: return "Done"
         }
@@ -372,49 +530,27 @@ struct AccountSetupView: View {
     }
 
     private var connectionTestAuthMaterial: ConnectionTestAuthMaterial {
-        if let oauthTokens {
-            return .oauth2(oauthTokens)
-        }
-        if let existingAccount = mode.existingAccount,
-           let provider = provider.oauthProvider,
-           matchesExistingOAuthAuth(existingAccount, provider: provider),
-           let storedOAuthTokens {
-            return .oauth2(storedOAuthTokens)
-        }
-        if let existingAccount = mode.existingAccount,
-           matchesExistingPasswordAuth(existingAccount),
-           password.isEmpty,
-           let storedPassword {
-            return .password(storedPassword)
-        }
-        return .password(password)
+        credentialState.connectionTestAuthMaterial
+    }
+
+    private var credentialState: AccountSetupCredentialState {
+        AccountSetupCredentialState(
+            existingAccount: mode.existingAccount,
+            provider: provider,
+            enteredPassword: password,
+            enteredOAuthTokens: oauthTokens,
+            storedPassword: storedPassword,
+            storedOAuthTokens: storedOAuthTokens,
+            storedCredentialsDidLoad: storedCredentialsDidLoad
+        )
     }
 
     private var oauthCredentialsReady: Bool {
-        if oauthTokens != nil {
-            return true
-        }
-
-        guard mode.isEditing,
-              let existingAccount = mode.existingAccount,
-              case .oauth2(let existingProvider) = existingAccount.authMethod else {
-            return false
-        }
-
-        return provider.oauthProvider == existingProvider
+        credentialState.oauthCredentialsReady
     }
 
     private var passwordCredentialsReady: Bool {
-        if !password.isEmpty {
-            return true
-        }
-
-        guard let existingAccount = mode.existingAccount,
-              matchesExistingPasswordAuth(existingAccount) else {
-            return false
-        }
-
-        return storedPassword != nil
+        credentialState.passwordCredentialsReady
     }
 
     private func advanceStep() {
@@ -577,6 +713,12 @@ struct AccountSetupView: View {
     private func preloadStoredCredentialsIfNeeded() async {
         guard let existingAccount = mode.existingAccount else { return }
 
+        await MainActor.run {
+            storedCredentialsDidLoad = false
+            storedPassword = nil
+            storedOAuthTokens = nil
+        }
+
         let keychainManager = KeychainManager()
         switch existingAccount.authMethod {
         case .password:
@@ -584,12 +726,14 @@ struct AccountSetupView: View {
             await MainActor.run {
                 storedPassword = password
                 storedOAuthTokens = nil
+                storedCredentialsDidLoad = true
             }
         case .oauth2:
             let tokens = await keychainManager.getOAuthTokens(accountId: existingAccount.id)
             await MainActor.run {
                 storedOAuthTokens = tokens
                 storedPassword = nil
+                storedCredentialsDidLoad = true
             }
         }
     }
@@ -692,8 +836,9 @@ private struct ProviderSelectionView: View {
 private struct CredentialsFormView: View {
     @Environment(AppState.self) private var appState
     @State private var showingAdvancedDAV = false
+    let mode: AccountSetupMode
     let provider: ProviderChoice
-    let isEditing: Bool
+    let credentialStatus: AccountSetupCredentialStatus?
     @Binding var emailAddress: String
     @Binding var displayName: String
     @Binding var imapHost: String
@@ -712,6 +857,11 @@ private struct CredentialsFormView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if let existingAccount = mode.existingAccount {
+                    existingAccountBanner(existingAccount)
+                    Divider()
+                }
+
                 emailSection
 
                 if provider.usesOAuth {
@@ -736,6 +886,45 @@ private struct CredentialsFormView: View {
         }
     }
 
+    private func existingAccountBanner(_ account: Account) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Editing \(account.label)")
+                        .font(.headline)
+                    Text("These fields are prefilled from the current account so you can update it in place instead of starting over.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 12)
+                Text("Existing Account")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.accentColor.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+
+            if let credentialStatus {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: credentialStatus.icon)
+                        .foregroundStyle(credentialStatus.tint)
+                        .padding(.top, 1)
+                    Text(credentialStatus.message)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+    }
+
     private var emailSection: some View {
         Group {
             Text("Email Settings").font(.headline)
@@ -746,7 +935,7 @@ private struct CredentialsFormView: View {
             if !provider.usesOAuth {
                 SecureField("Password", text: $password)
                     .textFieldStyle(.roundedBorder)
-                if isEditing {
+                if mode.isEditing {
                     Text("Leave the password blank to keep the current saved password.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -758,7 +947,7 @@ private struct CredentialsFormView: View {
                     Link("Create an app-specific password", destination: URL(string: "https://support.apple.com/121539")!)
                         .font(.caption)
                 }
-            } else if isEditing {
+            } else if mode.isEditing {
                 Text("Your existing browser sign-in will stay in place unless you complete browser sign-in again.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

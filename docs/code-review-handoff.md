@@ -6,6 +6,53 @@ Purpose: Carry forward a full review into a fresh session with enough context to
 
 ## Session Update (March 7, 2026, current latest)
 
+This handoff now reflects the follow-up polish pass after the account-edit checkpoint.
+
+Completed in this session:
+- Tightened edit-mode credential reuse so saved Keychain passwords/OAuth tokens are only reused after preload finishes, avoiding premature connection tests with missing auth material.
+- Added an explicit existing-account banner and credential-status messaging in the setup sheet so editing feels persistent instead of like a fresh add flow.
+- Reworked the Accounts-tab setup sheet presentation to use a fresh session for every add/edit open, fixing the stale-sheet bug where `Edit Account...` could reopen the previous add flow.
+- Made the connection-test results card scroll independently and added recovery copy so `Back` / `Retry Test` stay reachable after multi-service failures.
+- Updated CalDAV/CardDAV to track the effective HTTPS origin returned by redirects, preserve discovered absolute DAV home-set URLs, and trust Apple's partitioned iCloud DAV host families (`pXX-*.icloud.com`, including the `calendarws` / `contactsws` variants) without dropping the cross-origin protections.
+- Added a `Quitting...` loading state to the menu bar quit action so shutdown gives immediate visual feedback before the app exits.
+- Added focused app tests covering saved-password reuse, delayed saved-OAuth-token reuse, edit-mode provider changes that require fresh credentials, fresh add/edit sheet sessions, and Apple-style DAV redirected/sharded origins.
+- Cleaned up the remaining Swift 6/NIO concurrency warnings by moving NIO pipeline mutations in `OAuthCallbackServer`, IMAP/SMTP, and IPC onto event-loop `syncOperations` instead of the async `Sendable`-checked helpers.
+- Re-ran the local verification paths, confirmed `swift test` passes, confirmed the release install succeeds, and manually verified that the Apple/iCloud edit flow now tests green across IMAP, SMTP, CalDAV, and CardDAV.
+
+Current build/test/install status after these fixes:
+- `swift test`: passed
+- Test suite reported 204 passing tests across 31 suites
+- `swift build -c release`: passed
+- `make install`: passed
+- Release builds are clean; the earlier Swift 6/NIO `Sendable` warnings in `OAuthCallbackServer`, IMAP/SMTP, and IPC are gone
+
+New tests added in this session:
+- `Tests/ClawMailAppTests/AccountSetupCredentialStateTests.swift`
+- `Tests/ClawMailAppTests/SetupSheetControllerTests.swift`
+
+Key implementation files changed in this session:
+- `Sources/ClawMailApp/Account/AccountSetupView.swift`
+- `Sources/ClawMailApp/Account/ConnectionTestView.swift`
+- `Sources/ClawMailApp/MenuBar/StatusMenu.swift`
+- `Sources/ClawMailApp/Settings/AccountsTab.swift`
+- `Sources/ClawMailCore/Auth/OAuthCallbackServer.swift`
+- `Sources/ClawMailCore/Calendar/CalDAVClient.swift`
+- `Sources/ClawMailCore/Contacts/CardDAVClient.swift`
+- `Sources/ClawMailCore/DAVURLValidator.swift`
+- `Sources/ClawMailCore/Email/IMAPClient.swift`
+- `Sources/ClawMailCore/Email/SMTPClient.swift`
+- `Sources/ClawMailCore/IPC/IPCClient.swift`
+- `Sources/ClawMailCore/IPC/IPCServer.swift`
+- `Tests/ClawMailAppTests/AccountSetupCredentialStateTests.swift`
+- `Tests/ClawMailAppTests/SetupSheetControllerTests.swift`
+- `Tests/ClawMailCoreTests/DAVSecurityTests.swift`
+- `ROADMAP.md`
+- `docs/code-review-handoff.md`
+
+Next issue to start with:
+- Resume manual provider verification beyond the now-passing Apple/iCloud flow, starting with Google OAuth, then generic IMAP/SMTP + DAV, and Microsoft OAuth.
+- After provider verification, the main remaining backlog is the product-polish work in `ROADMAP.md` (welcome/onboarding, branded app icon, custom menu bar icon, and event-driven UI refresh).
+
 This handoff now reflects the latest checkpoint after account-editing work and startup Keychain-prompt cleanup.
 
 Completed in this session:
@@ -17,10 +64,10 @@ Completed in this session:
 - Confirmed with live manual verification that startup Keychain prompts dropped from two prompts to one prompt.
 - Added regression coverage for provider inference, account updates, and API server startup without a preloaded API key.
 
-Known issue still open at this checkpoint:
+Known issue at that checkpoint (now addressed in the current latest update above):
 - The new edit flow is not fully buttoned up yet. Manual testing showed that editing an existing account still feels too much like a fresh add flow, connection tests in edit mode failed across all configured services, and a four-failure result set can push the navigation buttons below the bottom edge of the sheet so recovery is awkward. This is now an explicit backlog item in `ROADMAP.md` and should be the first follow-up in a fresh context.
 
-Additional follow-up captured from manual testing:
+Additional follow-up captured from manual testing at that checkpoint (now addressed above):
 - Quitting from the menu bar still feels sluggish/ambiguous because there is no clear visual pressed/loading feedback before the app exits. This is now tracked in `ROADMAP.md`.
 
 Current build/test/install status after these fixes:

@@ -4,6 +4,12 @@ Date: March 7, 2026
 Repository: `/Users/andrewrmitchell/Developer/ClawMail`
 Purpose: Carry forward a full review into a fresh session with enough context to fix issues without re-reading the entire repo.
 
+## Fresh Session Starting Point
+
+- Pre-handoff checkpoint: `7027ec6` (`Finish account edit polish and quiet NIO warnings`)
+- Worktree state at handoff write time: clean
+- Best restart point: begin from the newest commit that contains this handoff note, then continue provider verification with Google OAuth, generic IMAP/SMTP + DAV, and Microsoft OAuth
+
 ## Session Update (March 7, 2026, current latest)
 
 This handoff now reflects the follow-up polish pass after the account-edit checkpoint.

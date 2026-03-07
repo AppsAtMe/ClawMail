@@ -31,8 +31,7 @@ enum TestConfig {
     /// Check if the test infrastructure (Docker) is running.
     static func isInfrastructureAvailable() -> Bool {
         let semaphore = DispatchSemaphore(value: 0)
-        let result = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
-        result.initialize(to: false)
+        let result = BoolBox()
 
         let url = greenmailAPIURL.appendingPathComponent("api/user")
         var request = URLRequest(url: url)
@@ -40,16 +39,13 @@ enum TestConfig {
 
         let task = URLSession.shared.dataTask(with: request) { _, response, _ in
             if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                result.pointee = true
+                result.value = true
             }
             semaphore.signal()
         }
         task.resume()
         _ = semaphore.wait(timeout: .now() + 3)
-        let available = result.pointee
-        result.deinitialize(count: 1)
-        result.deallocate()
-        return available
+        return result.value
     }
 
     /// Create a test Account pointing to local GreenMail.
@@ -99,5 +95,9 @@ enum TestConfig {
             syncIntervalMinutes: 1,
             initialSyncDays: 7
         )
+    }
+
+    private final class BoolBox: @unchecked Sendable {
+        var value = false
     }
 }

@@ -59,7 +59,7 @@ public actor OAuthCallbackServer {
             // Set up a timeout to avoid hanging forever
             Task {
                 try? await Task.sleep(for: timeout)
-                await self.timeoutIfWaiting()
+                self.timeoutIfWaiting()
             }
         }
     }

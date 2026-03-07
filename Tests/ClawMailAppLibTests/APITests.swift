@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import HTTPTypes
 import NIOCore
+import Darwin
 @testable import ClawMailAppLib
 @testable import ClawMailCore
 
@@ -201,5 +202,70 @@ struct StatusRoutesTypesTests {
         #expect(summary.isEnabled == true)
         #expect(summary.hasCalDAV == false)
         #expect(summary.hasCardDAV == false)
+    }
+}
+
+// MARK: - APIServer Lifecycle Tests
+
+@Suite
+struct APIServerLifecycleTests {
+
+    @Test func apiServerStartsAndServesStatusRoute() async throws {
+        let port = try findFreePort()
+        let orchestrator = try AccountOrchestrator(
+            config: AppConfig(restApiPort: port),
+            databaseManager: try DatabaseManager(inMemory: true)
+        )
+        let server = APIServer(orchestrator: orchestrator, port: port)
+
+        try await server.start()
+        do {
+            let url = URL(string: "http://127.0.0.1:\(port)/api/v1/status")!
+            let (data, response) = try await URLSession.shared.data(from: url)
+
+            let httpResponse = try #require(response as? HTTPURLResponse)
+            #expect(httpResponse.statusCode == 200)
+
+            let body = try #require(String(data: data, encoding: .utf8))
+            #expect(body.contains("\"status\":\"running\""))
+        } catch {
+            await server.stop()
+            throw error
+        }
+        await server.stop()
+    }
+
+    private func findFreePort() throws -> Int {
+        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        #expect(fd >= 0)
+        defer { _ = Darwin.close(fd) }
+
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.stride)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(0).bigEndian
+        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+
+        let bindResult = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                Darwin.bind(fd, socketAddress, socklen_t(MemoryLayout<sockaddr_in>.stride))
+            }
+        }
+        guard bindResult == 0 else {
+            throw POSIXError(.EADDRNOTAVAIL)
+        }
+
+        var boundAddress = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.stride)
+        let nameResult = withUnsafeMutablePointer(to: &boundAddress) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                Darwin.getsockname(fd, socketAddress, &length)
+            }
+        }
+        guard nameResult == 0 else {
+            throw POSIXError(.EADDRNOTAVAIL)
+        }
+
+        return Int(UInt16(bigEndian: boundAddress.sin_port))
     }
 }

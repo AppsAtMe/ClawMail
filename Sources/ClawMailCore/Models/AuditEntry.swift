@@ -3,6 +3,7 @@ import Foundation
 // MARK: - AgentInterface
 
 public enum AgentInterface: String, Codable, Sendable {
+    case app
     case mcp
     case cli
     case rest

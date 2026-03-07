@@ -25,7 +25,7 @@ public actor SyncScheduler {
             try await engine.incrementalSync(account: account, folder: folder)
         }
         self.sleepOperation = { duration in
-            try await Task.sleep(for: duration)
+            try await SchedulerSleep.sleep(for: duration)
         }
     }
 
@@ -137,5 +137,83 @@ public actor SyncScheduler {
 
         var seen = Set<String>()
         return normalized.filter { seen.insert($0).inserted }
+    }
+}
+
+private enum SchedulerSleep {
+    static func sleep(for duration: Duration) async throws {
+        if duration <= .zero {
+            return
+        }
+
+        try Task.checkCancellation()
+        let state = SleepState()
+
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+                state.install(continuation: continuation, timer: timer)
+                timer.setEventHandler {
+                    state.resume(with: .success(()))
+                }
+                timer.schedule(deadline: .now() + .milliseconds(milliseconds(for: duration)))
+                timer.resume()
+            }
+        } onCancel: {
+            state.resume(with: .failure(CancellationError()))
+        }
+    }
+
+    private static func milliseconds(for duration: Duration) -> Int {
+        let components = duration.components
+        let secondsMilliseconds = max(0, components.seconds) * 1_000
+        let attosecondsMilliseconds = max(0, components.attoseconds) / 1_000_000_000_000_000
+        let total = secondsMilliseconds + attosecondsMilliseconds
+        return min(Int.max, Int(total))
+    }
+}
+
+private final class SleepState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var timer: DispatchSourceTimer?
+    private var finished = false
+
+    func install(continuation: CheckedContinuation<Void, Error>, timer: DispatchSourceTimer) {
+        let shouldCancelImmediately: Bool
+
+        lock.lock()
+        shouldCancelImmediately = finished
+        if !finished {
+            self.continuation = continuation
+            self.timer = timer
+        }
+        lock.unlock()
+
+        if shouldCancelImmediately {
+            timer.cancel()
+            continuation.resume(throwing: CancellationError())
+        }
+    }
+
+    func resume(with result: Result<Void, Error>) {
+        let continuation: CheckedContinuation<Void, Error>?
+        let timer: DispatchSourceTimer?
+
+        lock.lock()
+        guard !finished else {
+            lock.unlock()
+            return
+        }
+        finished = true
+        continuation = self.continuation
+        timer = self.timer
+        self.continuation = nil
+        self.timer = nil
+        lock.unlock()
+
+        timer?.setEventHandler {}
+        timer?.cancel()
+        continuation?.resume(with: result)
     }
 }

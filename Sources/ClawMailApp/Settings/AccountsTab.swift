@@ -3,11 +3,13 @@ import ClawMailCore
 
 /// Accounts settings tab: list of configured accounts with add/remove/edit.
 struct AccountsTab: View {
+    internal let inspection = Inspection<Self>()
     @Environment(AppState.self) private var environmentAppState
     private let appStateOverride: AppState?
     private let removeAccountAction: @MainActor (AppState, Account) async throws -> Void
-    @State private var selectedAccountId: UUID?
+    private let initialSelectedAccountId: UUID?
     @State private var showingSetup = false
+    @State private var setupMode: AccountSetupMode = .add
     @State private var showingDeleteConfirm = false
     @State private var errorState: UIErrorState?
 
@@ -19,27 +21,28 @@ struct AccountsTab: View {
     ) {
         self.appStateOverride = appState
         self.removeAccountAction = removeAccountAction
-        _selectedAccountId = State(initialValue: initialSelectedAccountId)
+        self.initialSelectedAccountId = initialSelectedAccountId
         _errorState = State(initialValue: initialErrorState)
     }
 
     var body: some View {
+        @Bindable var state = appState
+
         HStack(spacing: 0) {
             // Account list sidebar
             VStack(spacing: 0) {
-                List(selection: $selectedAccountId) {
+                List(selection: $state.selectedSettingsAccountID) {
                     ForEach(appState.accounts) { account in
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(statusColor(for: account.connectionStatus))
-                                .frame(width: 8, height: 8)
-                            VStack(alignment: .leading) {
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
                                 Text(account.label)
                                     .font(.headline)
                                 Text(account.emailAddress)
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(Color.primary.opacity(0.72))
                             }
+                            Spacer()
+                            ConnectionStatusBadge(status: account.connectionStatus)
                         }
                         .tag(account.id)
                     }
@@ -49,11 +52,18 @@ struct AccountsTab: View {
                 Divider()
 
                 HStack {
-                    Button(action: { showingSetup = true }) {
+                    Button(action: beginAddAccount) {
                         Image(systemName: "plus")
                     }
                     .buttonStyle(.borderless)
                     .help("Add Account")
+
+                    Button(action: beginEditSelectedAccount) {
+                        Image(systemName: "pencil")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(selectedAccount == nil)
+                    .help("Edit Account")
 
                     Button(action: { showingDeleteConfirm = true }) {
                         Image(systemName: "minus")
@@ -72,7 +82,7 @@ struct AccountsTab: View {
 
             // Account detail
             if let account = selectedAccount {
-                AccountDetailView(account: account)
+                AccountDetailView(account: account, onEdit: beginEditSelectedAccount)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView(
@@ -84,7 +94,7 @@ struct AccountsTab: View {
             }
         }
         .sheet(isPresented: $showingSetup) {
-            AccountSetupView()
+            AccountSetupView(mode: setupMode)
                 .environment(appState)
         }
         .alert("Remove Account", isPresented: $showingDeleteConfirm) {
@@ -104,10 +114,21 @@ struct AccountsTab: View {
         } message: {
             Text(errorState?.message ?? "Unknown error.")
         }
+        .onAppear {
+            presentSetupIfNeeded()
+            ensureAccountSelection(preferred: initialSelectedAccountId)
+        }
+        .onChange(of: appState.showAccountSetup) { _, _ in
+            presentSetupIfNeeded()
+        }
+        .onChange(of: appState.accounts.map(\.id)) { _, _ in
+            ensureAccountSelection(preferred: initialSelectedAccountId)
+        }
+        .onReceive(inspection.notice) { inspection.visit(self, $0) }
     }
 
     private var selectedAccount: Account? {
-        appState.accounts.first { $0.id == selectedAccountId }
+        appState.accounts.first { $0.id == appState.selectedSettingsAccountID }
     }
 
     private var appState: AppState {
@@ -119,9 +140,6 @@ struct AccountsTab: View {
             do {
                 try await removeAccountAction(appState, account)
                 await appState.refreshAccounts()
-                await MainActor.run {
-                    selectedAccountId = nil
-                }
             } catch {
                 await MainActor.run {
                     errorState = UIErrorState(action: "Removing account", error: error)
@@ -141,95 +159,110 @@ struct AccountsTab: View {
         try await appState.orchestrator?.removeAccount(label: account.label)
     }
 
-    private func statusColor(for status: ConnectionStatus) -> Color {
-        switch status {
-        case .connected: return .green
-        case .connecting: return .yellow
-        case .disconnected: return .gray
-        case .error: return .red
-        }
+    private func presentSetupIfNeeded() {
+        guard appState.showAccountSetup, !showingSetup else { return }
+        appState.showAccountSetup = false
+        beginAddAccount()
+    }
+
+    private func ensureAccountSelection(preferred preferredID: UUID? = nil) {
+        appState.ensureSelectedSettingsAccount(preferred: preferredID)
+    }
+
+    private func beginAddAccount() {
+        setupMode = .add
+        showingSetup = true
+    }
+
+    private func beginEditSelectedAccount() {
+        guard let selectedAccount else { return }
+        setupMode = .edit(selectedAccount)
+        showingSetup = true
     }
 }
 
 // MARK: - Account Detail View
 
 struct AccountDetailView: View {
+    @Environment(AppState.self) private var appState
     let account: Account
+    let onEdit: () -> Void
 
     var body: some View {
-        Form {
-            Section("Account") {
-                LabeledContent("Label", value: account.label)
-                LabeledContent("Email", value: account.emailAddress)
-                LabeledContent("Display Name", value: account.displayName)
-                LabeledContent("Auth", value: authMethodText)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(account.label)
+                    .font(.title2.bold())
+                Spacer()
+                Button("Edit Account...", action: onEdit)
             }
+            .padding(.horizontal)
+            .padding(.top)
 
-            Section("IMAP") {
-                LabeledContent("Host", value: account.imapHost)
-                LabeledContent("Port", value: "\(account.imapPort)")
-                LabeledContent("Security", value: account.imapSecurity.rawValue.uppercased())
-            }
-
-            Section("SMTP") {
-                LabeledContent("Host", value: account.smtpHost)
-                LabeledContent("Port", value: "\(account.smtpPort)")
-                LabeledContent("Security", value: account.smtpSecurity.rawValue.uppercased())
-            }
-
-            if let caldav = account.caldavURL {
-                Section("CalDAV") {
-                    LabeledContent("URL", value: caldav.absoluteString)
+            Form {
+                Section("Account") {
+                    LabeledContent("Label", value: account.label)
+                    LabeledContent("Email", value: account.emailAddress)
+                    LabeledContent("Display Name", value: account.displayName)
+                    LabeledContent("Auth", value: authMethodText)
                 }
-            }
 
-            if let carddav = account.carddavURL {
-                Section("CardDAV") {
-                    LabeledContent("URL", value: carddav.absoluteString)
+                Section("IMAP") {
+                    LabeledContent("Host", value: account.imapHost)
+                    LabeledContent("Port", value: "\(account.imapPort)")
+                    LabeledContent("Security", value: account.imapSecurity.rawValue.uppercased())
                 }
-            }
 
-            Section("Status") {
-                LabeledContent("Connection") {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(statusColor)
-                            .frame(width: 8, height: 8)
-                        Text(statusText)
+                Section("SMTP") {
+                    LabeledContent("Host", value: account.smtpHost)
+                    LabeledContent("Port", value: "\(account.smtpPort)")
+                    LabeledContent("Security", value: account.smtpSecurity.rawValue.uppercased())
+                }
+
+                if let caldav = account.caldavURL {
+                    Section("CalDAV") {
+                        LabeledContent("URL", value: caldav.absoluteString)
                     }
                 }
-                if let lastSync = account.lastSyncDate {
-                    LabeledContent("Last Sync", value: lastSync.formatted())
+
+                if let carddav = account.carddavURL {
+                    Section("CardDAV") {
+                        LabeledContent("URL", value: carddav.absoluteString)
+                    }
                 }
-                LabeledContent("Enabled", value: account.isEnabled ? "Yes" : "No")
+
+                Section("Status") {
+                    LabeledContent("Connection") {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            ConnectionStatusBadge(status: account.connectionStatus)
+                            if case .error(let message) = account.connectionStatus {
+                                Text(message)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
+                    }
+                    if let lastSync = account.lastSyncDate {
+                        LabeledContent("Last Sync", value: lastSync.formatted())
+                    }
+                    LabeledContent("Enabled", value: account.isEnabled ? "Yes" : "No")
+                    LabeledContent("Recent Activity") {
+                        Text(appState.accountActivity[account.label] ?? "Waiting for activity...")
+                            .foregroundStyle(Color.primary.opacity(0.8))
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
             }
+            .formStyle(.grouped)
+            .padding()
         }
-        .formStyle(.grouped)
-        .padding()
     }
 
     private var authMethodText: String {
         switch account.authMethod {
         case .password: return "Password"
-        case .oauth2(let provider): return "OAuth2 (\(provider.rawValue))"
-        }
-    }
-
-    private var statusText: String {
-        switch account.connectionStatus {
-        case .connected: return "Connected"
-        case .connecting: return "Connecting..."
-        case .disconnected: return "Disconnected"
-        case .error(let msg): return "Error: \(msg)"
-        }
-    }
-
-    private var statusColor: Color {
-        switch account.connectionStatus {
-        case .connected: return .green
-        case .connecting: return .yellow
-        case .disconnected: return .gray
-        case .error: return .red
+        case .oauth2(let provider): return "OAuth2 (\(provider.displayName))"
         }
     }
 }

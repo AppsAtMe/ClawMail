@@ -3,9 +3,29 @@ import UserNotifications
 import ClawMailCore
 import ClawMailAppLib
 
+private final class IPCServerBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: IPCServer?
+
+    var value: IPCServer? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            stored = newValue
+        }
+    }
+}
+
 /// Manages the ClawMail daemon lifecycle: orchestrator, IPC server, REST API server.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let settingsAutoOpenAttempts = 8
+    private static let settingsAutoOpenRetryDelay: Duration = .milliseconds(250)
 
     let appState = AppState()
 
@@ -50,6 +70,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let orchestrator = try AccountOrchestrator(config: config, databaseManager: db)
             appState.orchestrator = orchestrator
 
+            let ipcServerBox = IPCServerBox()
+            let appState = self.appState
+            let wm = WebhookManager(urlString: config.webhookURL)
+            appState.webhookManager = wm
+
+            // Wire callbacks before startup so initial account-connect events reach the UI.
+            await orchestrator.setCallbacks(
+                onNewMail: { [weak appState] accountLabel, folder in
+                    ipcServerBox.value?.sendNotification(JSONRPCNotification(
+                        method: "clawmail/newMail",
+                        params: ["account": .string(accountLabel), "folder": .string(folder)]
+                    ))
+                    if let wm {
+                        Task { await wm.notifyNewEmail(account: accountLabel, folder: folder) }
+                    }
+                    Task { @MainActor [weak appState] in
+                        appState?.recordActivity("New mail detected in \(folder)", accountLabel: accountLabel)
+                    }
+                },
+                onConnectionStatusChanged: { [weak appState] accountLabel, status in
+                    ipcServerBox.value?.sendNotification(JSONRPCNotification(
+                        method: "clawmail/connectionStatus",
+                        params: [
+                            "account": .string(accountLabel),
+                            "status": .string(String(describing: status)),
+                        ]
+                    ))
+                    Task { @MainActor [weak appState] in
+                        appState?.updateConnectionStatus(status, for: accountLabel)
+                        appState?.recordActivity(Self.connectionActivityMessage(for: accountLabel, status: status), accountLabel: accountLabel)
+                    }
+                },
+                onError: { [weak appState] accountLabel, errorMessage in
+                    ipcServerBox.value?.sendNotification(JSONRPCNotification(
+                        method: "clawmail/error",
+                        params: [
+                            "account": .string(accountLabel),
+                            "error": .string(errorMessage),
+                        ]
+                    ))
+                    Task { @MainActor [weak appState] in
+                        appState?.recordActivity("Error on \(accountLabel): \(errorMessage)", accountLabel: accountLabel)
+                    }
+                }
+            )
+
             // Start orchestrator (connects accounts, starts sync)
             try await orchestrator.start()
 
@@ -57,65 +123,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let ipcServer = IPCServer(orchestrator: orchestrator)
             try await ipcServer.start()
             appState.ipcServer = ipcServer
-
-            // Wire webhook manager (if configured)
-            let webhookManager = WebhookManager(urlString: config.webhookURL)
-            appState.webhookManager = webhookManager
-
-            // Wire orchestrator notifications → IPC server (MCP push) + webhooks
-            let wm = webhookManager
-            await orchestrator.setCallbacks(
-                onNewMail: { accountLabel, folder in
-                    ipcServer.sendNotification(JSONRPCNotification(
-                        method: "clawmail/newMail",
-                        params: ["account": .string(accountLabel), "folder": .string(folder)]
-                    ))
-                    if let wm = wm {
-                        Task { await wm.notifyNewEmail(account: accountLabel, folder: folder) }
-                    }
-                },
-                onConnectionStatusChanged: { accountLabel, status in
-                    ipcServer.sendNotification(JSONRPCNotification(
-                        method: "clawmail/connectionStatus",
-                        params: [
-                            "account": .string(accountLabel),
-                            "status": .string(String(describing: status)),
-                        ]
-                    ))
-                },
-                onError: { accountLabel, errorMessage in
-                    ipcServer.sendNotification(JSONRPCNotification(
-                        method: "clawmail/error",
-                        params: [
-                            "account": .string(accountLabel),
-                            "error": .string(errorMessage),
-                        ]
-                    ))
-                }
-            )
+            ipcServerBox.value = ipcServer
 
             // Request notification permission (no-op if already granted)
             await Self.requestNotificationAuthorization()
 
             // Wire pending approval → macOS notification
-            await orchestrator.setPendingApprovalCallback { accountLabel, emails in
+            await orchestrator.setPendingApprovalCallback { [weak appState] accountLabel, emails in
                 Task {
                     await Self.schedulePendingApprovalNotification(accountLabel: accountLabel, emails: emails)
                 }
-            }
-
-            // Retrieve API key for REST server
-            let keychainManager = KeychainManager()
-            var apiKey = await keychainManager.getAPIKey()
-            if apiKey == nil {
-                apiKey = try await keychainManager.generateAPIKey()
+                Task { @MainActor [weak appState] in
+                    appState?.recordActivity("Approval required for \(emails.joined(separator: ", "))", accountLabel: accountLabel)
+                }
             }
 
             // Start REST API server
             let apiServer = APIServer(
                 orchestrator: orchestrator,
-                port: config.restApiPort,
-                apiKey: apiKey
+                port: config.restApiPort
             )
             try await apiServer.start()
             appState.apiServer = apiServer
@@ -129,8 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             // If no accounts, prompt setup
             if appState.accounts.isEmpty {
-                appState.showSettings = true
-                appState.settingsTab = .accounts
+                requestSettingsWindow(selecting: .accounts, showAccountSetup: true)
             }
 
         } catch {
@@ -139,11 +164,84 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private static func connectionActivityMessage(for accountLabel: String, status: ConnectionStatus) -> String {
+        switch status {
+        case .connected:
+            return "\(accountLabel) connected"
+        case .connecting:
+            return "\(accountLabel) connecting"
+        case .disconnected:
+            return "\(accountLabel) disconnected"
+        case .error(let message):
+            return "\(accountLabel) error: \(message)"
+        }
+    }
+
     private static func requestNotificationAuthorization() async {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return
+        case .denied:
+            return
+        case .notDetermined:
+            break
+        @unknown default:
+            return
+        }
+
         do {
-            _ = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+            _ = try await center.requestAuthorization(options: [.alert, .sound])
         } catch {
+            let nsError = error as NSError
+            if nsError.domain == UNErrorDomain,
+               nsError.code == UNError.Code.notificationsNotAllowed.rawValue {
+                return
+            }
             log("Failed to request notification authorization: \(describe(error))")
+        }
+    }
+
+    private func requestSettingsWindow(selecting tab: SettingsTab, showAccountSetup: Bool) {
+        appState.settingsTab = tab
+        appState.showSettings = true
+        if showAccountSetup {
+            appState.showAccountSetup = true
+        }
+
+        attemptToOpenSettingsWindow(attempt: 1)
+    }
+
+    private func attemptToOpenSettingsWindow(attempt: Int) {
+        guard !hasVisibleStandardWindow else { return }
+
+        let settingsOpened =
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) ||
+            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        guard attempt < Self.settingsAutoOpenAttempts else {
+            if !settingsOpened {
+                Self.log("Failed to auto-open Settings: settings action was never handled.")
+            } else {
+                Self.log("Failed to auto-open Settings: no visible window after \(attempt) attempts.")
+            }
+            return
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: Self.settingsAutoOpenRetryDelay)
+            guard !hasVisibleStandardWindow else { return }
+            attemptToOpenSettingsWindow(attempt: attempt + 1)
+        }
+    }
+
+    private var hasVisibleStandardWindow: Bool {
+        NSApp.windows.contains { window in
+            window.isVisible && !window.isMiniaturized && !(window is NSPanel)
         }
     }
 

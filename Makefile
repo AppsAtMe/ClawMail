@@ -8,6 +8,11 @@ SIGNING_ID     ?= -
 TEAM_ID        ?=
 ENTITLEMENTS   := Sources/ClawMailApp/Resources/ClawMail.entitlements
 APP_BUNDLE     := build/ClawMail.app
+APP_INSTALL_DIR ?= /Applications
+BIN_DIR        ?= /usr/local/bin
+APP_INSTALL_PATH = $(APP_INSTALL_DIR)/ClawMail.app
+CLI_INSTALL_PATH = $(APP_INSTALL_PATH)/Contents/MacOS/ClawMailCLI
+MCP_INSTALL_PATH = $(APP_INSTALL_PATH)/Contents/MacOS/ClawMailMCP
 DMG_NAME       := ClawMail-$(VERSION).dmg
 DMG_PATH       := build/$(DMG_NAME)
 
@@ -109,19 +114,41 @@ endif
 # ──────────────────────────────────────────────
 install: bundle
 	@echo "Installing ClawMail..."
-	@cp -r $(APP_BUNDLE) /Applications/
-	@mkdir -p /usr/local/bin
-	@ln -sf /Applications/ClawMail.app/Contents/MacOS/ClawMailCLI /usr/local/bin/clawmail
-	@ln -sf /Applications/ClawMail.app/Contents/MacOS/ClawMailMCP /usr/local/bin/clawmail-mcp
-	@echo "Installed. Run 'clawmail' from terminal."
+	@mkdir -p "$(APP_INSTALL_DIR)"
+	@rm -rf "$(APP_INSTALL_PATH)"
+	@cp -R "$(APP_BUNDLE)" "$(APP_INSTALL_PATH)"
+	@if mkdir -p "$(BIN_DIR)" 2>/dev/null && [ -w "$(BIN_DIR)" ]; then \
+		if ln -sf "$(CLI_INSTALL_PATH)" "$(BIN_DIR)/clawmail" && \
+		   ln -sf "$(MCP_INSTALL_PATH)" "$(BIN_DIR)/clawmail-mcp"; then \
+			echo "Installed app to $(APP_INSTALL_PATH)"; \
+			echo "Installed CLI symlinks in $(BIN_DIR)"; \
+			echo "Run 'clawmail' from terminal."; \
+		else \
+			echo "Installed app to $(APP_INSTALL_PATH)"; \
+			echo "Could not create CLI symlinks in $(BIN_DIR)."; \
+			echo "Use $(CLI_INSTALL_PATH) directly, or rerun with BIN_DIR=\$$HOME/.local/bin."; \
+			echo "You can also create symlinks manually with sudo if you want them in $(BIN_DIR)."; \
+		fi; \
+	else \
+		echo "Installed app to $(APP_INSTALL_PATH)"; \
+		echo "Skipping CLI symlinks because $(BIN_DIR) is not writable."; \
+		echo "Use $(CLI_INSTALL_PATH) directly, or rerun with BIN_DIR=\$$HOME/.local/bin."; \
+		echo "You can also create symlinks manually with sudo if you want them in $(BIN_DIR)."; \
+	fi
 
 uninstall:
 	@echo "Uninstalling ClawMail..."
 	@launchctl unload ~/Library/LaunchAgents/com.clawmail.agent.plist 2>/dev/null || true
 	@rm -f ~/Library/LaunchAgents/com.clawmail.agent.plist
-	@rm -f /usr/local/bin/clawmail
-	@rm -f /usr/local/bin/clawmail-mcp
-	@rm -rf /Applications/ClawMail.app
+	@if [ -w "$(BIN_DIR)" ]; then \
+		rm -f "$(BIN_DIR)/clawmail"; \
+		rm -f "$(BIN_DIR)/clawmail-mcp"; \
+	elif [ -e "$(BIN_DIR)/clawmail" ] || [ -L "$(BIN_DIR)/clawmail" ] || \
+	     [ -e "$(BIN_DIR)/clawmail-mcp" ] || [ -L "$(BIN_DIR)/clawmail-mcp" ]; then \
+		echo "Skipping CLI symlink removal because $(BIN_DIR) is not writable."; \
+		echo "Remove them manually with sudo if needed."; \
+	fi
+	@rm -rf "$(APP_INSTALL_PATH)"
 	@echo "Uninstalled."
 
 # ──────────────────────────────────────────────

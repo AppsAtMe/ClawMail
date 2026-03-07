@@ -155,6 +155,23 @@ struct SyncSettingsRuntimeTests {
             )
         ])
     }
+
+    @Test func stopCancelsDefaultSchedulerSleepPromptly() async throws {
+        let scheduler = SyncScheduler()
+        let started = Date()
+
+        await scheduler.start(
+            accounts: [],
+            syncEngines: [:],
+            interval: 15 * 60,
+            folders: ["INBOX"]
+        )
+
+        try await Task.sleep(for: .milliseconds(25))
+        await scheduler.stop()
+
+        #expect(Date().timeIntervalSince(started) < 1)
+    }
 }
 
 private actor InitialSyncRecorder {

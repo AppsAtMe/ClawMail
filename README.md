@@ -37,12 +37,20 @@ cd ClawMail
 make install
 ```
 
-This builds a release binary, creates `ClawMail.app`, copies it to `/Applications`, and symlinks the CLI tools to `/usr/local/bin`:
+This builds a release binary, creates `ClawMail.app`, and installs it to `/Applications/ClawMail.app`.
+
+If `BIN_DIR` is writable, `make install` also symlinks the CLI tools there. By default, `BIN_DIR=/usr/local/bin`:
 
 | Symlink | Points to |
 |---------|-----------|
 | `/usr/local/bin/clawmail` | `ClawMail.app/Contents/MacOS/ClawMailCLI` |
 | `/usr/local/bin/clawmail-mcp` | `ClawMail.app/Contents/MacOS/ClawMailMCP` |
+
+If `/usr/local/bin` is not writable on your machine, the app install still succeeds and `make install` prints the direct executable path. You can either:
+
+- rerun with `make install BIN_DIR="$HOME/.local/bin"`
+- use `/Applications/ClawMail.app/Contents/MacOS/ClawMailCLI` and `/Applications/ClawMail.app/Contents/MacOS/ClawMailMCP` directly
+- create the `/usr/local/bin` symlinks manually with `sudo`
 
 Launch at login installs `~/Library/LaunchAgents/com.clawmail.agent.plist`, which starts `/Applications/ClawMail.app/Contents/MacOS/ClawMailApp`.
 
@@ -56,10 +64,10 @@ Removes the app, symlinks, and LaunchAgent.
 
 ## First-Run Setup
 
-1. **Launch ClawMail** — open from `/Applications` or run `open /Applications/ClawMail.app`. It appears as a menu bar icon (no Dock icon).
+1. **Launch ClawMail** — open from `/Applications` or run `open /Applications/ClawMail.app`. It appears as a menu bar icon (no Dock icon). On a first launch with no accounts configured, ClawMail opens Settings to the Accounts tab automatically and presents the add-account flow. If you close that window, you can reopen it from the menu bar icon.
 
 2. **Add an account** — click the menu bar icon, open Settings, go to the Accounts tab, and click "+". The setup wizard walks through:
-   - **Provider selection** (Gmail, Outlook, Other)
+   - **Provider selection** (Apple/iCloud, Gmail, Outlook, Other)
    - **Credentials** — server details and authentication
    - **Connection test** — verifies IMAP, SMTP, CalDAV, and CardDAV connectivity
    - **Label** — a short name used in CLI/API calls (e.g., `work`, `personal`)
@@ -72,6 +80,23 @@ Removes the app, symlinks, and LaunchAgent.
    - If macOS notification permission is granted, ClawMail posts a local notification when a send is held for approval
 
 4. **Connect an agent** — see [Agent Interfaces](#agent-interfaces) below.
+
+For manual testing, a handy way to keep app logs visible without blocking your shell is:
+
+```bash
+: > /tmp/clawmail.stderr.log && tail -n 0 -F /tmp/clawmail.stderr.log &
+open /Applications/ClawMail.app
+```
+
+### Apple / iCloud Setup
+
+Apple documents iCloud Mail for third-party apps via app-specific passwords and [publishes the mail server settings separately](https://support.apple.com/102525).
+
+1. Create an [app-specific password for your Apple Account](https://support.apple.com/121539)
+2. In ClawMail, choose `Apple / iCloud`
+3. Enter your iCloud email address and that app-specific password
+4. ClawMail prefills Apple's published mail servers:
+   `imap.mail.me.com:993` with SSL and `smtp.mail.me.com:587` with STARTTLS
 
 ### Gmail Setup
 
@@ -254,6 +279,8 @@ When first-time recipient approval blocks a send, ClawMail requests macOS notifi
 | Credentials | macOS Keychain (service: `com.clawmail`) |
 | LaunchAgent | `~/Library/LaunchAgents/com.clawmail.agent.plist` |
 | Logs | `/tmp/clawmail.stdout.log`, `/tmp/clawmail.stderr.log` |
+
+Direct app launches and LaunchAgent runs both append to those log files.
 
 ## Security
 

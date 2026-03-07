@@ -13,6 +13,7 @@ struct ActivityLogTab: View {
     @State private var searchText = ""
     @State private var autoRefresh = true
     @State private var errorState: UIErrorState?
+    @State private var lastRefreshDate: Date?
 
     private let refreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
@@ -44,7 +45,11 @@ struct ActivityLogTab: View {
 
                 Spacer()
 
-                Toggle("Auto-refresh", isOn: $autoRefresh)
+                Button(action: loadEntries) {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+
+                Toggle("Auto-refresh (5s)", isOn: $autoRefresh)
                     .toggleStyle(.switch)
 
                 Button(action: { exportLog() }) {
@@ -54,44 +59,64 @@ struct ActivityLogTab: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
 
+            if let lastRefreshDate {
+                HStack {
+                    Spacer()
+                    Text("Last refreshed \(lastRefreshDate.formatted(date: .omitted, time: .standard))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal)
+                        .padding(.bottom, 4)
+                }
+            }
+
             Divider()
 
             // Log table
-            Table(filteredEntries) {
-                TableColumn("Time") { entry in
-                    Text(entry.timestamp.formatted(date: .abbreviated, time: .standard))
-                        .font(.caption)
-                }
-                .width(min: 140, ideal: 160)
-
-                TableColumn("Interface") { entry in
-                    Text(entry.interface.rawValue.uppercased())
-                        .font(.caption.bold())
-                        .foregroundStyle(interfaceColor(entry.interface))
-                }
-                .width(min: 50, ideal: 60)
-
-                TableColumn("Operation") { entry in
-                    Text(entry.operation)
-                        .font(.system(.caption, design: .monospaced))
-                }
-                .width(min: 100, ideal: 150)
-
-                TableColumn("Account") { entry in
-                    Text(entry.account ?? "-")
-                        .font(.caption)
-                }
-                .width(min: 80, ideal: 100)
-
-                TableColumn("Result") { entry in
-                    HStack(spacing: 4) {
-                        Image(systemName: entry.result == .success ? "checkmark.circle" : "xmark.circle")
-                            .foregroundStyle(entry.result == .success ? .green : .red)
-                        Text(entry.result.rawValue)
+            if filteredEntries.isEmpty {
+                ContentUnavailableView(
+                    "No Activity Yet",
+                    systemImage: "list.bullet.rectangle",
+                    description: Text("Account lifecycle and command history will appear here.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Table(filteredEntries) {
+                    TableColumn("Time") { entry in
+                        Text(entry.timestamp.formatted(date: .abbreviated, time: .standard))
                             .font(.caption)
                     }
+                    .width(min: 140, ideal: 160)
+
+                    TableColumn("Interface") { entry in
+                        Text(entry.interface.rawValue.uppercased())
+                            .font(.caption.bold())
+                            .foregroundStyle(interfaceColor(entry.interface))
+                    }
+                    .width(min: 50, ideal: 60)
+
+                    TableColumn("Operation") { entry in
+                        Text(entry.operation)
+                            .font(.system(.caption, design: .monospaced))
+                    }
+                    .width(min: 100, ideal: 150)
+
+                    TableColumn("Account") { entry in
+                        Text(entry.account ?? "-")
+                            .font(.caption)
+                    }
+                    .width(min: 80, ideal: 100)
+
+                    TableColumn("Result") { entry in
+                        HStack(spacing: 4) {
+                            Image(systemName: entry.result == .success ? "checkmark.circle" : "xmark.circle")
+                                .foregroundStyle(entry.result == .success ? .green : .red)
+                            Text(entry.result.rawValue)
+                                .font(.caption)
+                        }
+                    }
+                    .width(min: 70, ideal: 80)
                 }
-                .width(min: 70, ideal: 80)
             }
         }
         .onAppear { loadEntries() }
@@ -123,6 +148,7 @@ struct ActivityLogTab: View {
                 let results = try await loadEntriesAction(appState, accountFilter)
                 await MainActor.run {
                     entries = results
+                    lastRefreshDate = Date()
                 }
             } catch {
                 await MainActor.run {
@@ -168,6 +194,7 @@ struct ActivityLogTab: View {
 
     private func interfaceColor(_ interface: AgentInterface) -> Color {
         switch interface {
+        case .app: return .green
         case .mcp: return .purple
         case .cli: return .blue
         case .rest: return .orange

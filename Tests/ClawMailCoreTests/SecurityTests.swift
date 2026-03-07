@@ -57,14 +57,6 @@ struct SecurityTests {
     // MARK: - SMTP Header Injection Prevention
 
     @Test func smtpSanitizeHeaderValueStripsNewlines() {
-        // Test via the public encodeHeader path — subject with CRLF should be stripped
-        let client = SMTPClient(
-            host: "localhost", port: 465,
-            security: .ssl,
-            credentials: .password("test"),
-            senderEmail: "test@test.com"
-        )
-
         // We can't directly test the private sanitizeHeaderValue, but we verify
         // the build of an OutgoingEmail with CRLF in the subject doesn't crash
         let email = OutgoingEmail(

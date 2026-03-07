@@ -32,5 +32,5 @@ jobs:
       - name: Build
         run: swift build
 
-      - name: Run unit tests
-        run: swift test --filter ClawMailCoreTests
+      - name: Run test suite
+        run: swift test

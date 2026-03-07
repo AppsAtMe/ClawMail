@@ -57,8 +57,8 @@ Held sends are retried automatically after approval, when the relevant account r
 | IPC socket | `~/Library/Application Support/ClawMail/clawmail.sock` |
 | IPC token | `~/Library/Application Support/ClawMail/ipc.token` |
 | LaunchAgent | `~/Library/LaunchAgents/com.clawmail.agent.plist` |
-| LaunchAgent stdout | `/tmp/clawmail.stdout.log` |
-| LaunchAgent stderr | `/tmp/clawmail.stderr.log` |
+| App stdout | `/tmp/clawmail.stdout.log` |
+| App stderr | `/tmp/clawmail.stderr.log` |
 
 Credentials, OAuth tokens, and the REST API key remain in the macOS Keychain under the `com.clawmail` service.
 

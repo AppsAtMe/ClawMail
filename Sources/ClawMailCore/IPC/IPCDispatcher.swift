@@ -33,37 +33,37 @@ public actor IPCDispatcher {
     private func handleMethod(_ method: String, params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         switch method {
         // Email operations
-        case "email.list": return try await handleEmailList(params)
-        case "email.read": return try await handleEmailRead(params)
+        case "email.list": return try await handleEmailList(params, interface: interface)
+        case "email.read": return try await handleEmailRead(params, interface: interface)
         case "email.send": return try await handleEmailSend(params, interface: interface)
         case "email.reply": return try await handleEmailReply(params, interface: interface)
         case "email.forward": return try await handleEmailForward(params, interface: interface)
         case "email.move": return try await handleEmailMove(params, interface: interface)
         case "email.delete": return try await handleEmailDelete(params, interface: interface)
         case "email.updateFlags": return try await handleEmailUpdateFlags(params, interface: interface)
-        case "email.search": return try await handleEmailSearch(params)
-        case "email.listFolders": return try await handleEmailListFolders(params)
+        case "email.search": return try await handleEmailSearch(params, interface: interface)
+        case "email.listFolders": return try await handleEmailListFolders(params, interface: interface)
         case "email.createFolder": return try await handleEmailCreateFolder(params, interface: interface)
         case "email.deleteFolder": return try await handleEmailDeleteFolder(params, interface: interface)
         case "email.downloadAttachment": return try await handleEmailDownloadAttachment(params)
 
         // Calendar operations
-        case "calendar.listCalendars": return try await handleCalendarListCalendars(params)
-        case "calendar.listEvents": return try await handleCalendarListEvents(params)
+        case "calendar.listCalendars": return try await handleCalendarListCalendars(params, interface: interface)
+        case "calendar.listEvents": return try await handleCalendarListEvents(params, interface: interface)
         case "calendar.createEvent": return try await handleCalendarCreateEvent(params, interface: interface)
         case "calendar.updateEvent": return try await handleCalendarUpdateEvent(params, interface: interface)
         case "calendar.deleteEvent": return try await handleCalendarDeleteEvent(params, interface: interface)
 
         // Contact operations
-        case "contacts.listAddressBooks": return try await handleContactsListAddressBooks(params)
-        case "contacts.list": return try await handleContactsList(params)
+        case "contacts.listAddressBooks": return try await handleContactsListAddressBooks(params, interface: interface)
+        case "contacts.list": return try await handleContactsList(params, interface: interface)
         case "contacts.create": return try await handleContactsCreate(params, interface: interface)
         case "contacts.update": return try await handleContactsUpdate(params, interface: interface)
         case "contacts.delete": return try await handleContactsDelete(params, interface: interface)
 
         // Task operations
-        case "tasks.listTaskLists": return try await handleTasksListTaskLists(params)
-        case "tasks.list": return try await handleTasksList(params)
+        case "tasks.listTaskLists": return try await handleTasksListTaskLists(params, interface: interface)
+        case "tasks.list": return try await handleTasksList(params, interface: interface)
         case "tasks.create": return try await handleTasksCreate(params, interface: interface)
         case "tasks.update": return try await handleTasksUpdate(params, interface: interface)
         case "tasks.delete": return try await handleTasksDelete(params, interface: interface)
@@ -155,19 +155,19 @@ public actor IPCDispatcher {
 
     // MARK: - Email Handlers
 
-    private func handleEmailList(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleEmailList(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let folder = optionalString(params, "folder") ?? "INBOX"
         let limit = optionalInt(params, "limit") ?? 50
         let offset = optionalInt(params, "offset") ?? 0
-        let messages = try await orchestrator.listMessages(account: account, folder: folder, limit: limit, offset: offset)
+        let messages = try await orchestrator.listMessages(account: account, folder: folder, limit: limit, offset: offset, interface: interface)
         return try encodableToValue(messages)
     }
 
-    private func handleEmailRead(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleEmailRead(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let id = try requireString(params, "id")
-        let message = try await orchestrator.readMessage(account: account, id: id)
+        let message = try await orchestrator.readMessage(account: account, id: id, interface: interface)
         return try encodableToValue(message)
     }
 
@@ -253,19 +253,19 @@ public actor IPCDispatcher {
         return try encodableToValue(updated)
     }
 
-    private func handleEmailSearch(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleEmailSearch(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let query = try requireString(params, "query")
         let folder = optionalString(params, "folder")
         let limit = optionalInt(params, "limit") ?? 50
         let offset = optionalInt(params, "offset") ?? 0
-        let messages = try await orchestrator.searchMessages(account: account, query: query, folder: folder, limit: limit, offset: offset)
+        let messages = try await orchestrator.searchMessages(account: account, query: query, folder: folder, limit: limit, offset: offset, interface: interface)
         return try encodableToValue(messages)
     }
 
-    private func handleEmailListFolders(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleEmailListFolders(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
-        let folders = try await orchestrator.listFolders(account: account)
+        let folders = try await orchestrator.listFolders(account: account, interface: interface)
         return try encodableToValue(folders)
     }
 
@@ -295,13 +295,13 @@ public actor IPCDispatcher {
 
     // MARK: - Calendar Handlers
 
-    private func handleCalendarListCalendars(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleCalendarListCalendars(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
-        let calendars = try await orchestrator.listCalendars(account: account)
+        let calendars = try await orchestrator.listCalendars(account: account, interface: interface)
         return try encodableToValue(calendars)
     }
 
-    private func handleCalendarListEvents(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleCalendarListEvents(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let fromStr = try requireString(params, "from")
         let toStr = try requireString(params, "to")
@@ -312,7 +312,7 @@ public actor IPCDispatcher {
               let to = formatter.date(from: toStr) else {
             throw ClawMailError.invalidParameter("Invalid date format. Use ISO 8601.")
         }
-        let events = try await orchestrator.listEvents(account: account, from: from, to: to, calendar: calendar)
+        let events = try await orchestrator.listEvents(account: account, from: from, to: to, calendar: calendar, interface: interface)
         return try encodableToValue(events)
     }
 
@@ -340,19 +340,19 @@ public actor IPCDispatcher {
 
     // MARK: - Contacts Handlers
 
-    private func handleContactsListAddressBooks(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleContactsListAddressBooks(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
-        let books = try await orchestrator.listAddressBooks(account: account)
+        let books = try await orchestrator.listAddressBooks(account: account, interface: interface)
         return try encodableToValue(books)
     }
 
-    private func handleContactsList(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleContactsList(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let addressBook = optionalString(params, "addressBook")
         let query = optionalString(params, "query")
         let limit = optionalInt(params, "limit") ?? 100
         let offset = optionalInt(params, "offset") ?? 0
-        let contacts = try await orchestrator.listContacts(account: account, addressBook: addressBook, query: query, limit: limit, offset: offset)
+        let contacts = try await orchestrator.listContacts(account: account, addressBook: addressBook, query: query, limit: limit, offset: offset, interface: interface)
         return try encodableToValue(contacts)
     }
 
@@ -380,17 +380,17 @@ public actor IPCDispatcher {
 
     // MARK: - Tasks Handlers
 
-    private func handleTasksListTaskLists(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleTasksListTaskLists(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
-        let lists = try await orchestrator.listTaskLists(account: account)
+        let lists = try await orchestrator.listTaskLists(account: account, interface: interface)
         return try encodableToValue(lists)
     }
 
-    private func handleTasksList(_ params: [String: AnyCodableValue]) async throws -> AnyCodableValue {
+    private func handleTasksList(_ params: [String: AnyCodableValue], interface: AgentInterface) async throws -> AnyCodableValue {
         let account = try requireString(params, "account")
         let taskList = optionalString(params, "taskList")
         let includeCompleted = optionalBool(params, "includeCompleted") ?? false
-        let tasks = try await orchestrator.listTasks(account: account, taskList: taskList, includeCompleted: includeCompleted)
+        let tasks = try await orchestrator.listTasks(account: account, taskList: taskList, includeCompleted: includeCompleted, interface: interface)
         return try encodableToValue(tasks)
     }
 

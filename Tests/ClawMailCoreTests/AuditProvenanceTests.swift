@@ -35,4 +35,20 @@ struct AuditProvenanceTests {
         #expect(IPCSessionType.cli.auditInterface == .cli)
         #expect(IPCSessionType.agent.auditInterface == .mcp)
     }
+
+    @Test func auditLogRoundTripsAppInterfaceEntries() throws {
+        let db = try DatabaseManager(inMemory: true)
+        let auditLog = AuditLog(db: db)
+
+        try auditLog.log(entry: AuditEntry(
+            interface: .app,
+            operation: "account.connect",
+            account: "work",
+            result: .success
+        ))
+
+        let entries = try auditLog.list(limit: 10)
+        #expect(entries.first?.interface == .app)
+        #expect(entries.first?.operation == "account.connect")
+    }
 }

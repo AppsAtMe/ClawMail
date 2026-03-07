@@ -14,10 +14,9 @@ public actor APIServer {
 
     private let orchestrator: AccountOrchestrator
     private let port: Int
-    private var runTask: Task<Void, any Error>?
+    private var runTask: Task<Void, Never>?
 
     public init(orchestrator: AccountOrchestrator, port: Int = 24601, apiKey: String? = nil) {
-        precondition(apiKey != nil, "APIServer requires a non-nil apiKey")
         self.orchestrator = orchestrator
         self.port = port
     }
@@ -26,27 +25,52 @@ public actor APIServer {
 
     /// Start the HTTP server on 127.0.0.1 with the configured port.
     public func start() async throws {
+        guard runTask == nil else { return }
+
         let router = buildRouter()
+        let startupSignal = ServerStartupSignal()
 
         let app = Application(
             router: router,
             configuration: .init(
                 address: .hostname("127.0.0.1", port: port)
-            )
+            ),
+            onServerRunning: { _ in
+                await startupSignal.markRunning()
+            }
         )
 
-        runTask = Task {
-            try await app.runService()
+        let task = Task {
+            do {
+                // The menu bar app owns its own lifecycle; the embedded REST server
+                // should not register process-wide signal handlers.
+                try await app.runService(gracefulShutdownSignals: [])
+            } catch is CancellationError {
+                _ = await startupSignal.failIfWaiting(CancellationError())
+            } catch {
+                let startupFailed = await startupSignal.failIfWaiting(error)
+                if !startupFailed {
+                    Self.log("REST API server stopped unexpectedly: \(Self.describe(error))")
+                }
+            }
         }
+        runTask = task
 
-        // Brief wait for bind — failures are immediate, success means the server is listening
-        try await Task.sleep(for: .milliseconds(200))
+        do {
+            try await startupSignal.waitUntilRunning()
+        } catch {
+            task.cancel()
+            runTask = nil
+            throw error
+        }
     }
 
     /// Stop the HTTP server.
     public func stop() async {
-        runTask?.cancel()
+        guard let task = runTask else { return }
         runTask = nil
+        task.cancel()
+        await task.value
     }
 
     // MARK: - Router Setup
@@ -55,7 +79,6 @@ public actor APIServer {
         let router = Router()
 
         // Auth middleware reads from Keychain on each request for hot-reload support.
-        // Nil apiKey is already caught by the precondition in init.
         router.middlewares.add(RateLimitMiddleware())
         router.middlewares.add(AuthMiddleware(keychainManager: KeychainManager()))
 
@@ -69,6 +92,74 @@ public actor APIServer {
         RecipientsRoutes.register(on: router, orchestrator: orchestrator)
 
         return router
+    }
+
+    private static func log(_ message: String) {
+        FileHandle.standardError.write(Data("[APIServer] \(message)\n".utf8))
+    }
+
+    private static func describe(_ error: Error) -> String {
+        if let localizedError = error as? LocalizedError,
+           let description = localizedError.errorDescription,
+           !description.isEmpty {
+            return description
+        }
+        return String(describing: error)
+    }
+}
+
+private actor ServerStartupSignal {
+    private enum State {
+        case idle
+        case waiting(CheckedContinuation<Void, any Error>)
+        case running
+        case failed(any Error)
+    }
+
+    private var state: State = .idle
+
+    func waitUntilRunning() async throws {
+        switch state {
+        case .running:
+            return
+        case .failed(let error):
+            throw error
+        case .idle:
+            try await withCheckedThrowingContinuation { continuation in
+                state = .waiting(continuation)
+            }
+        case .waiting:
+            preconditionFailure("waitUntilRunning() called more than once")
+        }
+    }
+
+    func markRunning() {
+        switch state {
+        case .idle:
+            state = .running
+        case .waiting(let continuation):
+            state = .running
+            continuation.resume()
+        case .running, .failed:
+            break
+        }
+    }
+
+    @discardableResult
+    func failIfWaiting(_ error: any Error) -> Bool {
+        switch state {
+        case .idle:
+            state = .failed(error)
+            return true
+        case .waiting(let continuation):
+            state = .failed(error)
+            continuation.resume(throwing: error)
+            return true
+        case .running:
+            return false
+        case .failed:
+            return true
+        }
     }
 }
 

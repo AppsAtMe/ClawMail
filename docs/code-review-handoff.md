@@ -1,10 +1,201 @@
 # ClawMail Code Review Handoff
 
-Date: March 6, 2026
+Date: March 7, 2026
 Repository: `/Users/andrewrmitchell/Developer/ClawMail`
 Purpose: Carry forward a full review into a fresh session with enough context to fix issues without re-reading the entire repo.
 
-## Session Update (March 6, 2026, current latest)
+## Session Update (March 7, 2026, current latest)
+
+This handoff now reflects the latest checkpoint after account-editing work and startup Keychain-prompt cleanup.
+
+Completed in this session:
+- Added a real existing-account edit path in Settings so configured accounts can now be updated in place instead of only removed and re-added.
+- Wired the Accounts tab and account detail pane to open the setup sheet in edit mode for the selected account.
+- Added orchestrator-level account updates that preserve the existing account identity, save the new configuration, reconnect enabled accounts, and roll back on failure.
+- Made the edit flow infer the provider from the existing account, preseed provider defaults, and reuse the currently stored password/OAuth tokens when possible.
+- Removed the app's eager REST API Keychain read from launch, so startup no longer pulls the API key just to boot the menu bar app.
+- Confirmed with live manual verification that startup Keychain prompts dropped from two prompts to one prompt.
+- Added regression coverage for provider inference, account updates, and API server startup without a preloaded API key.
+
+Known issue still open at this checkpoint:
+- The new edit flow is not fully buttoned up yet. Manual testing showed that editing an existing account still feels too much like a fresh add flow, connection tests in edit mode failed across all configured services, and a four-failure result set can push the navigation buttons below the bottom edge of the sheet so recovery is awkward. This is now an explicit backlog item in `ROADMAP.md` and should be the first follow-up in a fresh context.
+
+Additional follow-up captured from manual testing:
+- Quitting from the menu bar still feels sluggish/ambiguous because there is no clear visual pressed/loading feedback before the app exits. This is now tracked in `ROADMAP.md`.
+
+Current build/test/install status after these fixes:
+- `swift test`: passed
+- Test suite reported 192 passing tests across 29 suites
+- `make install`: passed
+- Updated app bundle installed to `/Applications/ClawMail.app`
+
+New tests added in this session:
+- `Tests/ClawMailCoreTests/AccountUpdateTests.swift`
+- `Tests/ClawMailAppTests/AccountSetupProviderTests.swift` gained provider inference coverage
+- `Tests/ClawMailAppLibTests/APITests.swift` now covers API server startup without a preloaded launch-time API key
+
+Key implementation files changed in this session:
+- `Sources/ClawMailApp/Settings/AccountsTab.swift`
+- `Sources/ClawMailApp/Account/AccountSetupView.swift`
+- `Sources/ClawMailApp/AppDelegate.swift`
+- `Sources/ClawMailAppLib/APIServer.swift`
+- `Sources/ClawMailCore/AccountOrchestrator.swift`
+- `Tests/ClawMailCoreTests/AccountUpdateTests.swift`
+- `Tests/ClawMailAppTests/AccountSetupProviderTests.swift`
+- `Tests/ClawMailAppLibTests/APITests.swift`
+- `ROADMAP.md`
+- `docs/code-review-handoff.md`
+
+Next issue to start with:
+- Fix the remaining edit-account UX regression: keep the sheet recoverable after multi-service failures, make the prefilled state feel obviously persistent, and understand why edit-mode connection tests are failing for an already-working Apple account.
+- After that, resume provider verification with Google OAuth and the generic IMAP/SMTP + DAV path.
+
+## Session Update (March 6, 2026, previous latest)
+
+This handoff now reflects follow-up UX and manual-testing fixes after the first real provider setup pass.
+
+Completed in this session:
+- Added `Apple / iCloud` as a first-class provider option in the account setup wizard instead of forcing Apple users through the generic `Other` path.
+- Made `Apple / iCloud` the default provider choice and locked the picker order with regression coverage.
+- Prefilled the Apple/iCloud provider with Apple's published IMAP/SMTP settings and kept it on the password/app-specific-password path rather than the Google/Microsoft OAuth flow.
+- Updated provider naming and account auth labels so setup reads more like a native Mac app (`Apple / iCloud`, `Microsoft 365 / Outlook`, `Other Mail Account`).
+- Increased the account-setup sheet height and made the provider-selection step scrollable so the navigation buttons remain reachable with all four provider rows visible.
+- Improved failed connection-test results so the messages are aligned, selectable, and can include a clickable recovery link for provider-specific guidance.
+- Root-caused a later app abort to `SyncScheduler`'s default `Task.sleep` path firing around the 15-minute scheduled-sync interval, then replaced that sleep implementation with a dispatch-timer-based helper to avoid the Swift concurrency deallocation crash.
+- Tightened the manual log-tail instructions to clear old stderr output and show only new lines during app testing.
+- Fixed setup reruns after credential edits so moving back from a failed test and pressing `Test Connection` starts a fresh test instead of dumping the user onto stale results.
+- Made account saves behave more honestly in the UI by showing a saving/connecting state, surfacing a pending account immediately, and only showing the final success step after the add/connect path actually completes.
+- Wired startup and runtime connection/activity callbacks into `AppState` so the menu bar and Accounts settings screen can show live account activity instead of stale snapshots.
+- Replaced the account status dots with explicit status icons/checkmarks and added recent-activity text in the account detail view and menu bar.
+- Added internal `app` audit entries for account lifecycle events (`account.add`, `account.connect`, `account.disconnect`, `account.remove`) so the Activity Log no longer starts empty after normal app usage.
+- Improved the Activity Log tab with a manual refresh action, explicit `Auto-refresh (5s)` wording, empty-state messaging, and a last-refreshed timestamp.
+- Added provider-model regression tests covering the new Apple/iCloud path and the existing OAuth provider metadata.
+- Added a scheduler regression test to ensure stopping the default background-sync loop cancels promptly.
+- Fixed the manual testing/log-tail mismatch by making normal app launches append to `/tmp/clawmail.stdout.log` and `/tmp/clawmail.stderr.log`, not just LaunchAgent runs.
+- Updated the verification checklist and maintainer docs to background the log tail command and reflect the Apple/iCloud path.
+
+Current build/test status after these fixes:
+- `swift build -c release`: passed
+- `swift test`: passed
+- Test suite reported 183 passing tests across 27 suites
+
+New tests added in this session:
+- `Tests/ClawMailAppTests/AccountSetupProviderTests.swift`
+
+Key implementation files changed in this session:
+- `Sources/ClawMailApp/ClawMailApp.swift`
+- `Sources/ClawMailApp/Account/AccountSetupView.swift`
+- `Sources/ClawMailApp/Account/ConnectionTestView.swift`
+- `Sources/ClawMailApp/Account/OAuthFlowView.swift`
+- `Sources/ClawMailApp/Settings/AccountsTab.swift`
+- `Sources/ClawMailApp/Settings/ActivityLogTab.swift`
+- `Sources/ClawMailApp/MenuBar/StatusMenu.swift`
+- `Sources/ClawMailApp/AppState.swift`
+- `Sources/ClawMailApp/AppDelegate.swift`
+- `Sources/ClawMailCore/Models/Account.swift`
+- `Sources/ClawMailCore/Models/AuditEntry.swift`
+- `Sources/ClawMailCore/Sync/SyncScheduler.swift`
+- `Sources/ClawMailCore/AccountOrchestrator.swift`
+- `Tests/ClawMailAppTests/AccountSetupProviderTests.swift`
+- `Tests/ClawMailCoreTests/SyncSettingsRuntimeTests.swift`
+- `README.md`
+- `docs/account-verification-checklist.md`
+- `docs/operations-reference.md`
+- `ROADMAP.md`
+- `docs/code-review-handoff.md`
+
+Next issue to start with:
+- Manual provider verification should begin with the new Apple/iCloud path, then continue with Google OAuth, generic IMAP/SMTP + DAV, and Microsoft OAuth.
+- Remaining warnings are still concentrated in the Swift 6/NIO concurrency boundary for `OAuthCallbackServer`, IMAP/SMTP, and IPC.
+- UI polish backlog remains open for a welcome/onboarding screen, branded app icon, and custom menu bar icon.
+
+## Session Update (March 6, 2026, previous latest)
+
+This handoff now reflects follow-up fixes from the first manual app launch pass after the first-launch UX changes.
+
+Completed in this session:
+- Root-caused the disappearing menu bar icon to a startup crash in `APIServer.start()`, not the menu bar lifecycle itself.
+- Replaced the embedded REST server's brittle `Task.sleep` startup delay with a real startup handshake using Hummingbird's `onServerRunning` callback.
+- Stopped the embedded REST server from registering process-wide SIGINT/SIGTERM handlers inside the menu bar app process.
+- Added a live app-lib regression test that starts `APIServer`, hits `GET /api/v1/status`, and shuts the server down.
+- Verified that launching the built `.app` bundle now keeps the `ClawMailApp` process alive instead of aborting immediately on startup.
+
+Current build/test status after these fixes:
+- `swift build -c release`: passed
+- `swift test`: passed
+- Test suite reported 179 passing tests across 26 suites
+
+New tests added in this session:
+- `Tests/ClawMailAppLibTests/APITests.swift` gained `APIServerLifecycleTests`
+
+Key implementation files changed in this session:
+- `Sources/ClawMailAppLib/APIServer.swift`
+- `Tests/ClawMailAppLibTests/APITests.swift`
+- `docs/code-review-handoff.md`
+
+Next issue to start with:
+- Remaining warnings are still concentrated in the Swift 6/NIO concurrency boundary for `OAuthCallbackServer`, IMAP/SMTP, and IPC.
+- UI polish backlog remains open for a branded app icon and a custom menu bar icon.
+
+## Session Update (March 6, 2026, previous latest)
+
+This handoff now reflects follow-up fixes from the first real app-install/manual-smoke pass after the March 6 hardening work.
+
+Completed in this session:
+- Fixed first-launch discoverability for the menu bar app. Empty-account startup now opens Settings automatically and triggers the add-account flow instead of leaving the user at a silent menu bar-only state after launch.
+- Added an `Add Account...` shortcut to the menu bar status menu when no accounts are configured.
+- Made `make install` / `make uninstall` degrade gracefully when the CLI symlink target directory is not writable, and documented the fallback paths in the README.
+- Added a regression test for the account-setup auto-presentation path and cleaned up the remaining non-NIO warnings in the app test helpers.
+- Captured the still-open UX polish items (app icon, custom menu bar icon) and the remaining Swift 6/NIO warning cleanup as explicit roadmap backlog items.
+
+Current build/test status after these fixes:
+- `swift build -c release`: passed
+- `swift test`: passed
+- Test suite reported 178 passing tests across 25 suites
+
+New tests added in this session:
+- `Tests/ClawMailAppTests/SettingsInteractionTests.swift` gained startup/setup coverage
+
+Key implementation files changed in this session:
+- `Makefile`
+- `README.md`
+- `ROADMAP.md`
+- `Sources/ClawMailApp/AppDelegate.swift`
+- `Sources/ClawMailApp/MenuBar/StatusMenu.swift`
+- `Sources/ClawMailApp/Settings/AccountsTab.swift`
+- `Sources/ClawMailCore/Auth/OAuthCallbackServer.swift`
+- `Tests/ClawMailAppTests/SettingsInteractionTests.swift`
+- `Tests/ClawMailCoreTests/SecurityTests.swift`
+- `Tests/ClawMailIntegrationTests/IntegrationTestHelpers.swift`
+
+Next issue to start with:
+- Remaining warnings are now concentrated in the Swift 6/NIO concurrency boundary for `OAuthCallbackServer`, IMAP/SMTP, and IPC. They are still worth a deliberate cleanup pass to prevent warning blindness.
+- UI polish backlog remains open for a branded app icon and a custom menu bar icon.
+
+## Session Update (March 6, 2026, previous latest)
+
+This handoff now reflects a final verification pass after the March 6 hardening work.
+
+Completed in this session:
+- Re-ran `swift build` and `swift test`; both passed locally, with the full suite still reporting 177 passing tests across 25 suites.
+- Expanded GitHub Actions CI to run the full `swift test` suite instead of only `ClawMailCoreTests`, so the app, app-lib, and integration regressions covered in this handoff are enforced in CI as well.
+
+Current build/test status after these fixes:
+- `swift build`: passed
+- `swift test`: passed
+- Test suite reported 177 passing tests across 25 suites
+
+New tests added in this session:
+- None
+
+Key implementation files changed in this session:
+- `.github/workflows/ci.yml`
+- `docs/code-review-handoff.md`
+
+Next issue to start with:
+- No confirmed findings remain from the March 6 review handoff or the final verification pass.
+
+## Session Update (March 6, 2026, previous latest)
 
 This handoff now reflects the follow-up documentation sync and the deeper settings interaction coverage added after the remaining low-risk cleanup work.
 

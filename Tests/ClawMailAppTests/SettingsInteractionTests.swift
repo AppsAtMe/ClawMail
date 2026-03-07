@@ -94,6 +94,30 @@ struct SettingsInteractionTests {
         }
     }
 
+    @Test func accountsTabAutoPresentsSetupWhenRequested() async throws {
+        let appState = makeAppState()
+        appState.showAccountSetup = true
+        let sut = AccountsTab(appState: appState)
+
+        try await ViewHosting.host(sut.environment(appState)) {
+            try await sut.inspection.inspect(after: .milliseconds(50)) { _ in
+                #expect(appState.showAccountSetup == false)
+            }
+        }
+    }
+
+    @Test func accountsTabAutoSelectsFirstExistingAccount() async throws {
+        let account = sampleAccount()
+        let appState = makeAppState(accounts: [account])
+        let sut = AccountsTab(appState: appState)
+
+        try await ViewHosting.host(sut.environment(appState)) {
+            try await sut.inspection.inspect(after: .milliseconds(50)) { _ in
+                #expect(appState.selectedSettingsAccountID == account.id)
+            }
+        }
+    }
+
     private func makeAppState(accounts: [Account] = [], config: AppConfig = AppConfig()) -> AppState {
         let appState = AppState()
         appState.accounts = accounts

@@ -32,7 +32,7 @@ struct OAuthFlowView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Sign in with \(provider.rawValue.capitalized)")
+            Text("Sign in with \(provider.displayName)")
                 .font(.title3.bold())
 
             switch status {
@@ -95,7 +95,7 @@ struct OAuthFlowView: View {
         let clientId = OAuthHelpers.oauthClientId(for: provider, appConfig: appState.config)
         guard !clientId.isEmpty else {
             status = .failed
-            errorMessage = "OAuth client ID not configured for \(provider.rawValue.capitalized). Go to Settings → API → OAuth to enter your client ID."
+            errorMessage = "OAuth client ID not configured for \(provider.displayName). Go to Settings → API → OAuth to enter your client ID."
             return
         }
 

@@ -168,6 +168,12 @@ public actor AccountOrchestrator {
                 config.accounts[idx].connectionStatus = .disconnected
             }
             onConnectionStatusChanged?(label, .disconnected)
+            auditEvent(
+                interface: .app,
+                operation: "account.disconnect",
+                account: label,
+                parameters: ["reason": .string("app-stop")]
+            )
         }
         connections.removeAll()
     }
@@ -177,9 +183,21 @@ public actor AccountOrchestrator {
     public func addAccount(_ account: Account) async throws {
         config.accounts.append(account)
         try saveConfig(config)
-        if account.isEnabled {
-            try await connectAccount(account)
+        do {
+            if account.isEnabled {
+                try await connectAccount(account)
+            }
+        } catch {
+            config.accounts.removeAll { $0.id == account.id }
+            try? saveConfig(config)
+            throw error
         }
+        auditEvent(
+            interface: .app,
+            operation: "account.add",
+            account: account.label,
+            parameters: ["email": .string(account.emailAddress)]
+        )
         await restartSyncScheduler()
     }
 
@@ -190,6 +208,7 @@ public actor AccountOrchestrator {
             await conn.emailManager.disconnect()
             await conn.idleMonitor.stop()
             connections.removeValue(forKey: label)
+            onConnectionStatusChanged?(label, .disconnected)
         }
         if let account {
             try await credentialStore.deleteCredentials(accountId: account.id)
@@ -197,7 +216,67 @@ public actor AccountOrchestrator {
         try metadataIndex.purgeAccount(label: label)
         config.accounts.removeAll { $0.label == label }
         try saveConfig(config)
+        auditEvent(
+            interface: .app,
+            operation: "account.remove",
+            account: label
+        )
         await restartSyncScheduler()
+    }
+
+    public func updateAccount(label: String, with updatedAccount: Account) async throws {
+        guard let index = config.accounts.firstIndex(where: { $0.label == label }) else {
+            throw ClawMailError.accountNotFound(label)
+        }
+
+        let existingAccount = config.accounts[index]
+        guard existingAccount.id == updatedAccount.id else {
+            throw ClawMailError.invalidParameter("Updated account ID must match the existing account ID.")
+        }
+        guard updatedAccount.label == label else {
+            throw ClawMailError.invalidParameter("Renaming accounts is not supported yet.")
+        }
+
+        if let connection = connections[label] {
+            await connection.emailManager.disconnect()
+            await connection.idleMonitor.stop()
+            connections.removeValue(forKey: label)
+            onConnectionStatusChanged?(label, .disconnected)
+        }
+
+        config.accounts[index] = updatedAccount
+
+        do {
+            try saveConfig(config)
+
+            if updatedAccount.isEnabled {
+                try await connectAccount(updatedAccount)
+            } else if let updatedIndex = config.accounts.firstIndex(where: { $0.label == label }) {
+                config.accounts[updatedIndex].connectionStatus = .disconnected
+                onConnectionStatusChanged?(label, .disconnected)
+            }
+
+            auditEvent(
+                interface: .app,
+                operation: "account.update",
+                account: label,
+                parameters: ["email": .string(updatedAccount.emailAddress)]
+            )
+            await restartSyncScheduler()
+        } catch {
+            config.accounts[index] = existingAccount
+            try? saveConfig(config)
+
+            if existingAccount.isEnabled {
+                do {
+                    try await connectAccount(existingAccount)
+                } catch {
+                    onError?(label, "Failed to restore previous account settings: \(Self.describe(error))")
+                }
+            }
+
+            throw error
+        }
     }
 
     public func listAccounts() -> [Account] {
@@ -231,15 +310,40 @@ public actor AccountOrchestrator {
         folder: String = "INBOX",
         limit: Int = 50,
         offset: Int = 0,
-        sort: SortOrder = .dateDescending
+        sort: SortOrder = .dateDescending,
+        interface: AgentInterface = .cli
     ) async throws -> [EmailSummary] {
         let mgr = try emailManager(for: account)
-        return try await mgr.listMessages(folder: folder, limit: limit, offset: offset, sort: sort)
+        let messages = try await mgr.listMessages(folder: folder, limit: limit, offset: offset, sort: sort)
+
+        try auditSuccess(
+            interface: interface,
+            operation: "email.list",
+            account: account,
+            parameters: [
+                "folder": .string(folder),
+                "limit": .int(limit),
+                "offset": .int(offset),
+                "sort": .string(sort.rawValue),
+            ],
+            details: ["count": .int(messages.count)]
+        )
+
+        return messages
     }
 
-    public func readMessage(account: String, id: String) async throws -> EmailMessage {
+    public func readMessage(account: String, id: String, interface: AgentInterface = .cli) async throws -> EmailMessage {
         let mgr = try emailManager(for: account)
-        return try await mgr.readMessage(id: id)
+        let message = try await mgr.readMessage(id: id)
+
+        try auditSuccess(
+            interface: interface,
+            operation: "email.read",
+            account: account,
+            parameters: ["messageId": .string(id)]
+        )
+
+        return message
     }
 
     public func sendMessage(_ request: SendEmailRequest, interface: AgentInterface = .cli) async throws -> String {
@@ -385,15 +489,41 @@ public actor AccountOrchestrator {
         query: String,
         folder: String? = nil,
         limit: Int = 50,
-        offset: Int = 0
+        offset: Int = 0,
+        interface: AgentInterface = .cli
     ) async throws -> [EmailSummary] {
         let mgr = try emailManager(for: account)
-        return try await mgr.searchMessages(query: query, folder: folder, limit: limit, offset: offset)
+        let messages = try await mgr.searchMessages(query: query, folder: folder, limit: limit, offset: offset)
+
+        try auditSuccess(
+            interface: interface,
+            operation: "email.search",
+            account: account,
+            parameters: [
+                "query": .string(query),
+                "folder": folder.map(AnyCodableValue.string) ?? .null,
+                "limit": .int(limit),
+                "offset": .int(offset),
+            ],
+            details: ["count": .int(messages.count)]
+        )
+
+        return messages
     }
 
-    public func listFolders(account: String) async throws -> [FolderInfo] {
+    public func listFolders(account: String, interface: AgentInterface = .cli) async throws -> [FolderInfo] {
         let mgr = try emailManager(for: account)
-        return try await mgr.listFolders()
+        let folders = try await mgr.listFolders()
+
+        try auditSuccess(
+            interface: interface,
+            operation: "email.listFolders",
+            account: account,
+            parameters: [:],
+            details: ["count": .int(folders.count)]
+        )
+
+        return folders
     }
 
     public func createFolder(account: String, name: String, parent: String? = nil, interface: AgentInterface = .cli) async throws {
@@ -427,14 +557,38 @@ public actor AccountOrchestrator {
 
     // MARK: - Calendar Operations
 
-    public func listCalendars(account: String) async throws -> [CalendarInfo] {
+    public func listCalendars(account: String, interface: AgentInterface = .cli) async throws -> [CalendarInfo] {
         let mgr = try calendarManager(for: account)
-        return try await mgr.listCalendars()
+        let calendars = try await mgr.listCalendars()
+
+        try auditSuccess(
+            interface: interface,
+            operation: "calendar.listCalendars",
+            account: account,
+            parameters: [:],
+            details: ["count": .int(calendars.count)]
+        )
+
+        return calendars
     }
 
-    public func listEvents(account: String, from: Date, to: Date, calendar: String? = nil) async throws -> [CalendarEvent] {
+    public func listEvents(account: String, from: Date, to: Date, calendar: String? = nil, interface: AgentInterface = .cli) async throws -> [CalendarEvent] {
         let mgr = try calendarManager(for: account)
-        return try await mgr.listEvents(from: from, to: to, calendar: calendar)
+        let events = try await mgr.listEvents(from: from, to: to, calendar: calendar)
+
+        try auditSuccess(
+            interface: interface,
+            operation: "calendar.listEvents",
+            account: account,
+            parameters: [
+                "from": .string(from.ISO8601Format()),
+                "to": .string(to.ISO8601Format()),
+                "calendar": calendar.map(AnyCodableValue.string) ?? .null,
+            ],
+            details: ["count": .int(events.count)]
+        )
+
+        return events
     }
 
     public func createEvent(account: String, _ request: CreateEventRequest, interface: AgentInterface = .cli) async throws -> CalendarEvent {
@@ -479,14 +633,46 @@ public actor AccountOrchestrator {
 
     // MARK: - Contact Operations
 
-    public func listAddressBooks(account: String) async throws -> [AddressBook] {
+    public func listAddressBooks(account: String, interface: AgentInterface = .cli) async throws -> [AddressBook] {
         let mgr = try contactsManager(for: account)
-        return try await mgr.listAddressBooks()
+        let addressBooks = try await mgr.listAddressBooks()
+
+        try auditSuccess(
+            interface: interface,
+            operation: "contacts.listAddressBooks",
+            account: account,
+            parameters: [:],
+            details: ["count": .int(addressBooks.count)]
+        )
+
+        return addressBooks
     }
 
-    public func listContacts(account: String, addressBook: String? = nil, query: String? = nil, limit: Int = 100, offset: Int = 0) async throws -> [Contact] {
+    public func listContacts(
+        account: String,
+        addressBook: String? = nil,
+        query: String? = nil,
+        limit: Int = 100,
+        offset: Int = 0,
+        interface: AgentInterface = .cli
+    ) async throws -> [Contact] {
         let mgr = try contactsManager(for: account)
-        return try await mgr.listContacts(addressBook: addressBook, query: query, limit: limit, offset: offset)
+        let contacts = try await mgr.listContacts(addressBook: addressBook, query: query, limit: limit, offset: offset)
+
+        try auditSuccess(
+            interface: interface,
+            operation: "contacts.list",
+            account: account,
+            parameters: [
+                "addressBook": addressBook.map(AnyCodableValue.string) ?? .null,
+                "query": query.map(AnyCodableValue.string) ?? .null,
+                "limit": .int(limit),
+                "offset": .int(offset),
+            ],
+            details: ["count": .int(contacts.count)]
+        )
+
+        return contacts
     }
 
     public func createContact(account: String, _ request: CreateContactRequest, interface: AgentInterface = .cli) async throws -> Contact {
@@ -531,14 +717,42 @@ public actor AccountOrchestrator {
 
     // MARK: - Task Operations
 
-    public func listTaskLists(account: String) async throws -> [TaskList] {
+    public func listTaskLists(account: String, interface: AgentInterface = .cli) async throws -> [TaskList] {
         let mgr = try taskManager(for: account)
-        return try await mgr.listTaskLists()
+        let taskLists = try await mgr.listTaskLists()
+
+        try auditSuccess(
+            interface: interface,
+            operation: "tasks.listTaskLists",
+            account: account,
+            parameters: [:],
+            details: ["count": .int(taskLists.count)]
+        )
+
+        return taskLists
     }
 
-    public func listTasks(account: String, taskList: String? = nil, includeCompleted: Bool = false) async throws -> [TaskItem] {
+    public func listTasks(
+        account: String,
+        taskList: String? = nil,
+        includeCompleted: Bool = false,
+        interface: AgentInterface = .cli
+    ) async throws -> [TaskItem] {
         let mgr = try taskManager(for: account)
-        return try await mgr.listTasks(taskList: taskList, includeCompleted: includeCompleted)
+        let tasks = try await mgr.listTasks(taskList: taskList, includeCompleted: includeCompleted)
+
+        try auditSuccess(
+            interface: interface,
+            operation: "tasks.list",
+            account: account,
+            parameters: [
+                "taskList": taskList.map(AnyCodableValue.string) ?? .null,
+                "includeCompleted": .bool(includeCompleted),
+            ],
+            details: ["count": .int(tasks.count)]
+        )
+
+        return tasks
     }
 
     public func createTask(account: String, _ request: CreateTaskRequest, interface: AgentInterface = .cli) async throws -> TaskItem {
@@ -676,6 +890,24 @@ public actor AccountOrchestrator {
         ))
     }
 
+    private func auditEvent(
+        interface: AgentInterface,
+        operation: String,
+        account: String? = nil,
+        parameters: [String: AnyCodableValue]? = nil,
+        result: AuditResult = .success,
+        details: [String: AnyCodableValue]? = nil
+    ) {
+        try? auditLog.log(entry: AuditEntry(
+            interface: interface,
+            operation: operation,
+            account: account,
+            parameters: parameters,
+            result: result,
+            details: details
+        ))
+    }
+
     func performInitialSyncIfNeeded(
         account: Account,
         runInitialSync: @escaping @Sendable (Int) async throws -> Void
@@ -700,6 +932,10 @@ public actor AccountOrchestrator {
 
     private func connectAccount(_ account: Account) async throws {
         let credentials = try await credentialStore.credentialsFor(account: account)
+        if let idx = config.accounts.firstIndex(where: { $0.label == account.label }) {
+            config.accounts[idx].connectionStatus = .connecting
+        }
+        onConnectionStatusChanged?(account.label, .connecting)
 
         let imapCredential = credentials.imapCredential(username: account.emailAddress)
 
@@ -725,13 +961,36 @@ public actor AccountOrchestrator {
             metadataIndex: metadataIndex
         )
 
-        try await emailManager.connect()
+        do {
+            try await emailManager.connect()
+        } catch {
+            let message = Self.describe(error)
+            if let idx = config.accounts.firstIndex(where: { $0.label == account.label }) {
+                config.accounts[idx].connectionStatus = .error(message)
+            }
+            onConnectionStatusChanged?(account.label, .error(message))
+            auditEvent(
+                interface: .app,
+                operation: "account.connect",
+                account: account.label,
+                parameters: ["email": .string(account.emailAddress)],
+                result: .failure,
+                details: ["error": .string(message)]
+            )
+            throw error
+        }
 
         // Update account's connection status in config and notify
         if let idx = config.accounts.firstIndex(where: { $0.label == account.label }) {
             config.accounts[idx].connectionStatus = .connected
         }
         onConnectionStatusChanged?(account.label, .connected)
+        auditEvent(
+            interface: .app,
+            operation: "account.connect",
+            account: account.label,
+            parameters: ["email": .string(account.emailAddress)]
+        )
 
         var calMgr: CalendarManager? = nil
         var contactsMgr: ContactsManager? = nil
@@ -901,6 +1160,18 @@ public actor AccountOrchestrator {
 
         var seen = Set<String>()
         return normalized.filter { seen.insert($0).inserted }
+    }
+
+    private static func describe(_ error: Error) -> String {
+        if let clawMailError = error as? ClawMailError {
+            return clawMailError.message
+        }
+        if let localizedError = error as? LocalizedError,
+           let description = localizedError.errorDescription,
+           !description.isEmpty {
+            return description
+        }
+        return String(describing: error)
     }
 
     private func releaseReadyPendingApprovals(account: String) async throws {

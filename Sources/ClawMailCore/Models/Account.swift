@@ -72,6 +72,13 @@ public enum AuthMethod: Codable, Sendable, Equatable {
 public enum OAuthProvider: String, Codable, Sendable, Equatable {
     case google
     case microsoft
+
+    public var displayName: String {
+        switch self {
+        case .google: return "Google"
+        case .microsoft: return "Microsoft"
+        }
+    }
 }
 
 // MARK: - ConnectionSecurity

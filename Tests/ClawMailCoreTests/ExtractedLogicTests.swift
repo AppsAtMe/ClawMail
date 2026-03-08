@@ -186,6 +186,8 @@ struct OAuthHelpersTests {
         #expect(oauth.authorizationEndpoint.host == "login.microsoftonline.com")
         #expect(oauth.tokenEndpoint.host == "login.microsoftonline.com")
         #expect(oauth.scopes == [
+            "openid",
+            "email",
             "offline_access",
             "https://outlook.office.com/IMAP.AccessAsUser.All",
             "https://outlook.office.com/SMTP.Send",

@@ -127,8 +127,8 @@ enum ProviderChoice: String, CaseIterable {
             )
         case .fastmail:
             return ProviderDAVSettings(
-                caldavURL: "https://caldav.fastmail.com",
-                carddavURL: "https://carddav.fastmail.com"
+                caldavURL: "https://caldav.fastmail.com/.well-known/caldav",
+                carddavURL: "https://carddav.fastmail.com/.well-known/carddav"
             )
         case .microsoft, .other:
             return nil

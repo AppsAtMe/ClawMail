@@ -72,7 +72,7 @@ public actor CardDAVClient {
             try await applyAuth(to: &request)
 
             do {
-                let (_, response) = try await session.data(for: request)
+                let (_, response) = try await send(request)
                 if let httpResponse = response as? HTTPURLResponse,
                    (200...399).contains(httpResponse.statusCode) {
                     if let location = httpResponse.value(forHTTPHeaderField: "Location"),
@@ -99,14 +99,20 @@ public actor CardDAVClient {
         let body = CardDAVXMLBuilder.propfind(properties: ["d:current-user-principal"])
         request.httpBody = body.data(using: .utf8)
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await send(request)
         try updateServerURL(from: response)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ClawMailError.connectionError("Invalid response from CardDAV server")
         }
 
         if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-            throw ClawMailError.authFailed("CardDAV authentication failed (HTTP \(httpResponse.statusCode))")
+            throw ClawMailError.authFailed(
+                authFailureMessage(
+                    context: "authentication",
+                    statusCode: httpResponse.statusCode,
+                    data: data
+                )
+            )
         }
 
         guard (200...299).contains(httpResponse.statusCode) || httpResponse.statusCode == 207 else {
@@ -138,9 +144,9 @@ public actor CardDAVClient {
         ])
         request.httpBody = body.data(using: .utf8)
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await send(request)
         try updateServerURL(from: response)
-        try validateResponse(response, context: "listAddressBooks")
+        try validateResponse(response, context: "listAddressBooks", data: data)
 
         let responses = CardDAVResponseParser.parse(data: data)
         var books: [CardDAVAddressBook] = []
@@ -177,9 +183,9 @@ public actor CardDAVClient {
         }
         request.httpBody = body.data(using: .utf8)
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await send(request)
         try updateServerURL(from: response)
-        try validateResponse(response, context: "getContacts")
+        try validateResponse(response, context: "getContacts", data: data)
 
         let responses = CardDAVResponseParser.parse(data: data)
         return responses.compactMap { $0.addressData }
@@ -195,9 +201,9 @@ public actor CardDAVClient {
         try await applyAuth(to: &request)
         request.httpBody = CardDAVXMLBuilder.addressbookUIDQuery(uid: uid).data(using: .utf8)
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await send(request)
         try updateServerURL(from: response)
-        try validateResponse(response, context: "findContact")
+        try validateResponse(response, context: "findContact", data: data)
 
         let responses = CardDAVResponseParser.parse(data: data)
         for item in responses {
@@ -222,7 +228,7 @@ public actor CardDAVClient {
         try await applyAuth(to: &request)
         request.httpBody = vcard.data(using: .utf8)
 
-        let (_, response) = try await session.data(for: request)
+        let (_, response) = try await send(request)
         try updateServerURL(from: response)
         try validateResponse(response, context: "createContact", allowedCodes: [201, 204])
 
@@ -244,7 +250,7 @@ public actor CardDAVClient {
         try await applyAuth(to: &request)
         request.httpBody = vcard.data(using: .utf8)
 
-        let (_, response) = try await session.data(for: request)
+        let (_, response) = try await send(request)
         try updateServerURL(from: response)
         try validateResponse(response, context: "updateContact", allowedCodes: [200, 201, 204])
     }
@@ -262,7 +268,7 @@ public actor CardDAVClient {
         request.httpMethod = "DELETE"
         try await applyAuth(to: &request)
 
-        let (_, response) = try await session.data(for: request)
+        let (_, response) = try await send(request)
         try updateServerURL(from: response)
         try validateResponse(response, context: "deleteContact", allowedCodes: [200, 204])
     }
@@ -286,17 +292,31 @@ public actor CardDAVClient {
     private func validateResponse(
         _ response: URLResponse,
         context: String,
+        data: Data? = nil,
         allowedCodes: Set<Int> = [200, 207]
     ) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ClawMailError.connectionError("\(context): Invalid response")
         }
         if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-            throw ClawMailError.authFailed("CardDAV \(context): Authentication failed")
+            throw ClawMailError.authFailed(
+                authFailureMessage(
+                    context: context,
+                    statusCode: httpResponse.statusCode,
+                    data: data
+                )
+            )
         }
         guard allowedCodes.contains(httpResponse.statusCode) else {
             throw ClawMailError.serverError("CardDAV \(context): HTTP \(httpResponse.statusCode)")
         }
+    }
+
+    private func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        try await session.data(
+            for: request,
+            delegate: DAVRedirectPreservingDelegate(serviceName: "CardDAV", templateRequest: request)
+        )
     }
 
     private func updateServerURL(from response: URLResponse) throws {
@@ -316,8 +336,9 @@ public actor CardDAVClient {
         let body = CardDAVXMLBuilder.propfind(properties: ["card:addressbook-home-set"])
         request.httpBody = body.data(using: .utf8)
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await send(request)
         try updateServerURL(from: response)
+        try validateResponse(response, context: "discoverAddressBookHome", data: data)
         let responses = CardDAVResponseParser.parse(data: data)
         if let home = responses.first?.properties["addressbook-home-set"] {
             let homeURL = try resolveServerURL(home, context: "discoverAddressBookHome home-set")
@@ -347,6 +368,82 @@ public actor CardDAVClient {
             return url.absoluteString
         }
         return url.path
+    }
+
+    private func authFailureMessage(context: String, statusCode: Int, data: Data?) -> String {
+        if let detail = extractErrorDetail(from: data) {
+            return "CardDAV \(context): Authentication failed (HTTP \(statusCode)): \(detail)"
+        }
+        return "CardDAV \(context): Authentication failed (HTTP \(statusCode))"
+    }
+
+    private func extractErrorDetail(from data: Data?) -> String? {
+        guard let data, !data.isEmpty else { return nil }
+
+        if let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let error = jsonObject["error"] as? [String: Any] {
+                if let message = error["message"] as? String {
+                    return sanitizedErrorDetail(message)
+                }
+                if let description = error["error_description"] as? String {
+                    return sanitizedErrorDetail(description)
+                }
+            }
+            if let message = jsonObject["error_description"] as? String {
+                return sanitizedErrorDetail(message)
+            }
+            if let message = jsonObject["message"] as? String {
+                return sanitizedErrorDetail(message)
+            }
+        }
+
+        if let raw = String(data: data, encoding: .utf8) {
+            return sanitizedErrorDetail(raw)
+        }
+        return nil
+    }
+
+    private func sanitizedErrorDetail(_ raw: String) -> String? {
+        let collapsed = raw
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !collapsed.isEmpty else { return nil }
+        return collapsed.count > 160 ? String(collapsed.prefix(157)) + "..." : collapsed
+    }
+}
+
+private final class DAVRedirectPreservingDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let serviceName: String
+    private let templateRequest: URLRequest
+
+    init(serviceName: String, templateRequest: URLRequest) {
+        self.serviceName = serviceName
+        self.templateRequest = templateRequest
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        guard let redirectedURL = request.url,
+              (try? DAVURLValidator.validateConfiguredURL(redirectedURL, serviceName: serviceName)) != nil else {
+            completionHandler(nil)
+            return
+        }
+
+        var redirectedRequest = request
+        redirectedRequest.httpMethod = templateRequest.httpMethod
+        redirectedRequest.httpBody = templateRequest.httpBody
+        redirectedRequest.httpBodyStream = nil
+        for (field, value) in templateRequest.allHTTPHeaderFields ?? [:] {
+            redirectedRequest.setValue(value, forHTTPHeaderField: field)
+        }
+
+        completionHandler(redirectedRequest)
     }
 }
 

@@ -107,6 +107,33 @@ struct DAVSecurityTests {
         #expect(requests.allSatisfy { $0.url?.host == "contacts.example.com" })
     }
 
+    @Test func cardDAVAuthFailureIncludesJSONErrorDetail() async throws {
+        let session = makeSession()
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == "www.googleapis.com")
+            return self.response(
+                url: request.url!,
+                status: 403,
+                body: """
+                {"error":{"message":"Request had insufficient authentication scopes."}}
+                """
+            )
+        }
+
+        let client = try CardDAVClient(
+            baseURL: URL(string: "https://www.googleapis.com/.well-known/carddav")!,
+            credential: .oauthToken(.constant("access-token")),
+            session: session
+        )
+
+        do {
+            try await client.authenticate()
+            Issue.record("Expected CardDAV authentication to fail")
+        } catch let error as ClawMailError {
+            #expect(error.message.contains("insufficient authentication scopes"))
+        }
+    }
+
     @Test func calDAVRejectsCrossOriginCalendarHrefDuringListing() async throws {
         let session = makeSession()
         MockDAVURLProtocol.enqueue { request in
@@ -301,6 +328,65 @@ struct DAVSecurityTests {
 
         let requestHosts = MockDAVURLProtocol.recordedRequests().compactMap { $0.url?.host }
         #expect(requestHosts == ["contacts.icloud.com", "p42-contacts.icloud.com", "p42-contacts.icloud.com"])
+    }
+
+    @Test func cardDAVPreservesAuthenticatedPropfindAcrossRedirects() async throws {
+        let session = makeSession()
+        let redirectedURL = URL(string: "https://apidata.googleusercontent.com/carddav/v1/principals/user/lists/default/")!
+        let redirectedPrincipalURL = URL(string: "https://apidata.googleusercontent.com/carddav/v1/principals/user/")!
+
+        MockDAVURLProtocol.enqueueRedirect { request in
+            #expect(request.url?.absoluteString == "https://www.googleapis.com/.well-known/carddav")
+            #expect(request.httpMethod == "PROPFIND")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer dav-token")
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 301,
+                httpVersion: nil,
+                headerFields: ["Location": redirectedURL.absoluteString]
+            )!
+            var redirectedRequest = URLRequest(url: redirectedURL)
+            redirectedRequest.httpMethod = "GET"
+            return (response, redirectedRequest)
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url == redirectedURL)
+            #expect(request.httpMethod == "PROPFIND")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer dav-token")
+            #expect(request.value(forHTTPHeaderField: "Depth") == "0")
+            return self.response(
+                url: redirectedURL,
+                body: self.multistatusBody(
+                    property: "current-user-principal",
+                    href: redirectedPrincipalURL.path
+                )
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url?.host == redirectedPrincipalURL.host)
+            #expect(request.url?.path == redirectedPrincipalURL.path)
+            #expect(request.httpMethod == "PROPFIND")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer dav-token")
+            return self.response(
+                url: request.url!,
+                body: self.multistatusBody(
+                    property: "addressbook-home-set",
+                    href: "/carddav/v1/principals/user/lists/default/"
+                )
+            )
+        }
+
+        let client = try CardDAVClient(
+            baseURL: URL(string: "https://www.googleapis.com/.well-known/carddav")!,
+            credential: .oauthToken(OAuthTokenProvider { "dav-token" }),
+            session: session
+        )
+
+        try await client.authenticate()
+
+        let requestHosts = MockDAVURLProtocol.recordedRequests().compactMap { $0.url?.host }
+        #expect(requestHosts == ["www.googleapis.com", "apidata.googleusercontent.com", "apidata.googleusercontent.com"])
     }
 
     @Test func calDAVAcceptsAppleShardHomeSetWithoutHTTPRedirect() async throws {
@@ -589,7 +675,7 @@ struct DAVSecurityTests {
 
 private final class MockDAVURLProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
-    private nonisolated(unsafe) static var handlers: [@Sendable (URLRequest) throws -> (HTTPURLResponse, Data)] = []
+    private nonisolated(unsafe) static var handlers: [@Sendable (URLRequest, URLProtocol) throws -> Void] = []
     private nonisolated(unsafe) static var requests: [URLRequest] = []
 
     static func reset() {
@@ -602,7 +688,23 @@ private final class MockDAVURLProtocol: URLProtocol, @unchecked Sendable {
     static func enqueue(_ handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)) {
         lock.lock()
         defer { lock.unlock() }
-        handlers.append(handler)
+        handlers.append { request, proto in
+            let (response, data) = try handler(request)
+            proto.client?.urlProtocol(proto, didReceive: response, cacheStoragePolicy: .notAllowed)
+            proto.client?.urlProtocol(proto, didLoad: data)
+            proto.client?.urlProtocolDidFinishLoading(proto)
+        }
+    }
+
+    static func enqueueRedirect(
+        _ handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, URLRequest)
+    ) {
+        lock.lock()
+        defer { lock.unlock() }
+        handlers.append { request, proto in
+            let (response, redirectedRequest) = try handler(request)
+            proto.client?.urlProtocol(proto, wasRedirectedTo: redirectedRequest, redirectResponse: response)
+        }
     }
 
     static func recordedRequests() -> [URLRequest] {
@@ -620,7 +722,7 @@ private final class MockDAVURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func startLoading() {
-        let handler: (@Sendable (URLRequest) throws -> (HTTPURLResponse, Data))?
+        let handler: (@Sendable (URLRequest, URLProtocol) throws -> Void)?
         Self.lock.lock()
         Self.requests.append(request)
         handler = Self.handlers.isEmpty ? nil : Self.handlers.removeFirst()
@@ -632,10 +734,7 @@ private final class MockDAVURLProtocol: URLProtocol, @unchecked Sendable {
         }
 
         do {
-            let (response, data) = try handler(request)
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
+            try handler(request, self)
         } catch {
             client?.urlProtocol(self, didFailWithError: error)
         }

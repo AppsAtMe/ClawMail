@@ -16,9 +16,16 @@ public actor OAuthCallbackServer {
         public let state: String
     }
 
+    enum CallbackEvent: Sendable {
+        case success(CallbackResult)
+        case failure(String)
+    }
+
     private let group: EventLoopGroup
     private var channel: Channel?
     private var continuation: CheckedContinuation<CallbackResult, any Error>?
+    private var timeoutTask: Scheduled<Void>?
+    private var isStopped = false
 
     public init() {
         self.group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
@@ -27,8 +34,8 @@ public actor OAuthCallbackServer {
     /// Start listening on 127.0.0.1 with an OS-assigned port.
     /// Returns the actual port and the full redirect URI to use in the authorization URL.
     public func start() async throws -> (port: Int, redirectURI: String) {
-        let handler = CallbackHandler { [weak self] result in
-            Task { await self?.deliverResult(result) }
+        let handler = CallbackHandler { [weak self] event in
+            Task { await self?.deliver(event) }
         }
 
         let bootstrap = ServerBootstrap(group: group)
@@ -58,37 +65,87 @@ public actor OAuthCallbackServer {
 
     /// Wait for the OAuth callback. Times out after the specified duration.
     public func waitForCallback(timeout: Duration = .seconds(120)) async throws -> CallbackResult {
-        try await withCheckedThrowingContinuation { cont in
-            self.continuation = cont
-
-            // Set up a timeout to avoid hanging forever
-            Task {
-                try? await Task.sleep(for: timeout)
-                self.timeoutIfWaiting()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { cont in
+                continuation = cont
+                scheduleTimeout(timeout)
+            }
+        } onCancel: {
+            Task { [weak self] in
+                await self?.cancelWaitIfNeeded()
             }
         }
     }
 
     /// Stop the callback server and release resources.
     public func stop() async {
-        let noPromise: EventLoopPromise<Void>? = nil
-        channel?.close(mode: .all, promise: noPromise)
-        channel = nil
+        cancelTimeout()
+        cancelWaitIfNeeded()
+
+        if let channel {
+            self.channel = nil
+            try? await channel.close().get()
+        }
+
+        guard !isStopped else { return }
+        isStopped = true
         try? await group.shutdownGracefully()
     }
 
     // MARK: - Internal
 
-    private func deliverResult(_ result: CallbackResult) {
+    private func deliver(_ event: CallbackEvent) {
         guard let cont = continuation else { return }
         continuation = nil
-        cont.resume(returning: result)
+        cancelTimeout()
+
+        switch event {
+        case .success(let result):
+            cont.resume(returning: result)
+        case .failure(let message):
+            cont.resume(throwing: ClawMailError.authFailed(message))
+        }
     }
 
     private func timeoutIfWaiting() {
         guard let cont = continuation else { return }
         continuation = nil
+        timeoutTask = nil
         cont.resume(throwing: ClawMailError.connectionError("OAuth callback timed out"))
+    }
+
+    private func cancelWaitIfNeeded() {
+        guard let cont = continuation else { return }
+        continuation = nil
+        cancelTimeout()
+        cont.resume(throwing: CancellationError())
+    }
+
+    // Use the server's event loop timer instead of Task.sleep so callback teardown
+    // does not race a sleeping Swift task when OAuth returns successfully.
+    private func scheduleTimeout(_ timeout: Duration) {
+        cancelTimeout()
+        let eventLoop = channel?.eventLoop ?? group.next()
+        timeoutTask = eventLoop.scheduleTask(in: timeAmount(for: timeout)) { [weak self] in
+            guard let self else { return }
+            Task {
+                await self.timeoutIfWaiting()
+            }
+        }
+    }
+
+    private func cancelTimeout() {
+        timeoutTask?.cancel()
+        timeoutTask = nil
+    }
+
+    private func timeAmount(for duration: Duration) -> TimeAmount {
+        let components = duration.components
+        let secondsInNanoseconds: Int64 = 1_000_000_000
+        let attosecondsPerNanosecond: Int64 = 1_000_000_000
+        let wholeNanoseconds = components.seconds &* secondsInNanoseconds
+        let fractionalNanoseconds = components.attoseconds / attosecondsPerNanosecond
+        return .nanoseconds(max(wholeNanoseconds &+ fractionalNanoseconds, 0))
     }
 }
 
@@ -99,10 +156,10 @@ private final class CallbackHandler: ChannelInboundHandler, @unchecked Sendable 
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
 
-    private let onCallback: @Sendable (OAuthCallbackServer.CallbackResult) -> Void
+    private let onCallback: @Sendable (OAuthCallbackServer.CallbackEvent) -> Void
     private var delivered = false
 
-    init(onCallback: @escaping @Sendable (OAuthCallbackServer.CallbackResult) -> Void) {
+    init(onCallback: @escaping @Sendable (OAuthCallbackServer.CallbackEvent) -> Void) {
         self.onCallback = onCallback
     }
 
@@ -132,11 +189,16 @@ private final class CallbackHandler: ChannelInboundHandler, @unchecked Sendable 
         // Check for error from provider
         if let error = queryItems.first(where: { $0.name == "error" })?.value {
             let description = queryItems.first(where: { $0.name == "error_description" })?.value ?? error
-            sendResponse(
-                context: context,
-                status: .ok,
-                body: errorPage(description)
-            )
+            if !delivered {
+                delivered = true
+                sendResponse(
+                    context: context,
+                    status: .ok,
+                    body: errorPage(description)
+                )
+                let combinedMessage = description == error ? error : "\(error): \(description)"
+                onCallback(.failure(combinedMessage))
+            }
             return
         }
 
@@ -151,7 +213,7 @@ private final class CallbackHandler: ChannelInboundHandler, @unchecked Sendable 
         if !delivered {
             delivered = true
             sendResponse(context: context, status: .ok, body: successPage)
-            onCallback(OAuthCallbackServer.CallbackResult(code: code, state: state))
+            onCallback(.success(OAuthCallbackServer.CallbackResult(code: code, state: state)))
         }
     }
 

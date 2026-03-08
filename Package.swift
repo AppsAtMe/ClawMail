@@ -76,6 +76,8 @@ let package = Package(
             exclude: [
                 "Resources/Info.plist",
                 "Resources/ClawMail.entitlements",
+                "Resources/AppIcon.icns",
+                "Resources/Branding",
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

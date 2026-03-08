@@ -180,12 +180,12 @@ public actor AccountOrchestrator {
 
     // MARK: - Account Management
 
-    public func addAccount(_ account: Account) async throws {
+    public func addAccount(_ account: Account, initialCredentials: Credentials? = nil) async throws {
         config.accounts.append(account)
         try saveConfig(config)
         do {
             if account.isEnabled {
-                try await connectAccount(account)
+                try await connectAccount(account, credentialsOverride: initialCredentials)
             }
         } catch {
             config.accounts.removeAll { $0.id == account.id }
@@ -224,7 +224,11 @@ public actor AccountOrchestrator {
         await restartSyncScheduler()
     }
 
-    public func updateAccount(label: String, with updatedAccount: Account) async throws {
+    public func updateAccount(
+        label: String,
+        with updatedAccount: Account,
+        initialCredentials: Credentials? = nil
+    ) async throws {
         guard let index = config.accounts.firstIndex(where: { $0.label == label }) else {
             throw ClawMailError.accountNotFound(label)
         }
@@ -250,7 +254,7 @@ public actor AccountOrchestrator {
             try saveConfig(config)
 
             if updatedAccount.isEnabled {
-                try await connectAccount(updatedAccount)
+                try await connectAccount(updatedAccount, credentialsOverride: initialCredentials)
             } else if let updatedIndex = config.accounts.firstIndex(where: { $0.label == label }) {
                 config.accounts[updatedIndex].connectionStatus = .disconnected
                 onConnectionStatusChanged?(label, .disconnected)
@@ -930,8 +934,12 @@ public actor AccountOrchestrator {
         )
     }
 
-    private func connectAccount(_ account: Account) async throws {
-        let credentials = try await credentialStore.credentialsFor(account: account)
+    private func connectAccount(_ account: Account, credentialsOverride: Credentials? = nil) async throws {
+        let credentials = if let credentialsOverride {
+            credentialsOverride
+        } else {
+            try await credentialStore.credentialsFor(account: account)
+        }
         if let idx = config.accounts.firstIndex(where: { $0.label == account.label }) {
             config.accounts[idx].connectionStatus = .connecting
         }

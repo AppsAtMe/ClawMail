@@ -4,6 +4,33 @@ enum ConnectionTestAuthMaterial: Sendable {
     case password(String)
     case oauth2(OAuthTokens)
 
+    func credentials() -> Credentials {
+        switch self {
+        case .password(let password):
+            return .password(password)
+        case .oauth2(let tokens):
+            return .oauth2(tokenProvider: .constant(tokens.accessToken))
+        }
+    }
+
+    func grantsGoogleScope(_ scope: String) -> Bool? {
+        switch self {
+        case .password:
+            return nil
+        case .oauth2(let tokens):
+            return tokens.grantsScope(scope)
+        }
+    }
+
+    func grantedGoogleScopes() -> [String]? {
+        switch self {
+        case .password:
+            return nil
+        case .oauth2(let tokens):
+            return tokens.grantedScopes
+        }
+    }
+
     func imapCredential(email: String) -> IMAPCredential {
         switch self {
         case .password(let password):

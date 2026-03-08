@@ -40,9 +40,11 @@ public enum OAuthHelpers {
                 authorizationEndpoint: URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!,
                 tokenEndpoint: URL(string: "https://oauth2.googleapis.com/token")!,
                 scopes: [
+                    "openid",
+                    "email",
                     "https://mail.google.com/",
                     "https://www.googleapis.com/auth/calendar",
-                    "https://www.googleapis.com/auth/contacts",
+                    "https://www.google.com/m8/feeds",
                 ],
                 redirectURI: redirectURI
             )
@@ -54,11 +56,8 @@ public enum OAuthHelpers {
                 tokenEndpoint: URL(string: "https://login.microsoftonline.com/common/oauth2/v2.0/token")!,
                 scopes: [
                     "offline_access",
-                    "IMAP.AccessAsUser.All",
-                    "SMTP.Send",
-                    "Calendars.ReadWrite",
-                    "Contacts.ReadWrite",
-                    "Tasks.ReadWrite",
+                    "https://outlook.office.com/IMAP.AccessAsUser.All",
+                    "https://outlook.office.com/SMTP.Send",
                 ],
                 redirectURI: redirectURI
             )

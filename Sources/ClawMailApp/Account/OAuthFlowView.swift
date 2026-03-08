@@ -15,6 +15,7 @@ struct OAuthFlowView: View {
     @Environment(AppState.self) private var appState
 
     let provider: OAuthProvider
+    let loginHint: String?
     @Binding var inProgress: Bool
     /// Called with the obtained tokens after a successful OAuth flow.
     var onTokensObtained: ((OAuthTokens) -> Void)?
@@ -41,6 +42,13 @@ struct OAuthFlowView: View {
                     Text("Click below to open your browser and sign in.")
                         .foregroundStyle(.secondary)
 
+                    if let hint = providerSetupHint {
+                        Text(hint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+
                     Button("Open Browser") {
                         startOAuthFlow()
                     }
@@ -58,6 +66,13 @@ struct OAuthFlowView: View {
                     Text("Complete the sign-in in your browser.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+
+                    if let hint = providerWaitingHint {
+                        Text(hint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
 
                     Button("Cancel") {
                         cancelFlow()
@@ -95,7 +110,7 @@ struct OAuthFlowView: View {
         let clientId = OAuthHelpers.oauthClientId(for: provider, appConfig: appState.config)
         guard !clientId.isEmpty else {
             status = .failed
-            errorMessage = "OAuth client ID not configured for \(provider.displayName). Go to Settings → API → OAuth to enter your client ID."
+            errorMessage = missingClientIDMessage(for: provider)
             return
         }
 
@@ -106,6 +121,7 @@ struct OAuthFlowView: View {
             do {
                 // 1. Generate cryptographic state (CSRF prevention)
                 let state = OAuthHelpers.generateState()
+                let pkce = OAuth2Manager.generatePKCEChallenge()
 
                 // 2. Start local callback server on random port
                 let server = OAuthCallbackServer()
@@ -124,7 +140,12 @@ struct OAuthFlowView: View {
                 )
                 await oauthManager.setConfig(config, for: provider)
 
-                let authURL = try await oauthManager.buildAuthorizationURL(provider: provider, state: state)
+                let authURL = try await oauthManager.buildAuthorizationURL(
+                    provider: provider,
+                    state: state,
+                    codeChallenge: pkce.challenge,
+                    loginHint: loginHint
+                )
 
                 // 4. Open the user's browser
                 NSWorkspace.shared.open(authURL)
@@ -143,7 +164,8 @@ struct OAuthFlowView: View {
                 let tokens = try await oauthManager.exchangeCodeForTokens(
                     code: result.code,
                     provider: provider,
-                    redirectURI: redirectURI
+                    redirectURI: redirectURI,
+                    codeVerifier: pkce.verifier
                 )
 
                 // 8. Clean up server
@@ -164,9 +186,14 @@ struct OAuthFlowView: View {
                 }
                 await MainActor.run {
                     self.callbackServer = nil
-                    self.status = .failed
-                    self.errorMessage = String(describing: error)
                     self.inProgress = false
+                    if error is CancellationError {
+                        self.status = .waiting
+                        self.errorMessage = nil
+                    } else {
+                        self.status = .failed
+                        self.errorMessage = self.userVisibleOAuthError(error)
+                    }
                 }
             }
         }
@@ -180,8 +207,60 @@ struct OAuthFlowView: View {
             await MainActor.run {
                 callbackServer = nil
                 status = .waiting
+                errorMessage = nil
                 inProgress = false
             }
         }
+    }
+
+    private func missingClientIDMessage(for provider: OAuthProvider) -> String {
+        switch provider {
+        case .google:
+            return "Google OAuth client ID not configured. Create a Desktop app OAuth client in Google Cloud Console, then paste its Client ID into Settings → API → OAuth Client IDs."
+        case .microsoft:
+            return "Microsoft OAuth client ID not configured. Create an app registration in Microsoft Entra, then paste its Application (client) ID into Settings → API → OAuth Client IDs."
+        }
+    }
+
+    private var providerSetupHint: String? {
+        switch provider {
+        case .google:
+            return "Google Cloud setup note: if your OAuth consent screen is in Testing, add your Google account as a test user before trying browser sign-in. If a personal Gmail address is rejected as ineligible, check that the project Audience is set to External. In Google Auth platform > Data Access, make sure the Gmail, Calendar, and Google Contacts CardDAV scope (`https://www.google.com/m8/feeds`) are configured. The email field above is only a browser sign-in hint until Google confirms the authorized account."
+        case .microsoft:
+            return "Microsoft setup note: the app registration should allow the Mobile and desktop applications platform with http://localhost."
+        }
+    }
+
+    private var providerWaitingHint: String? {
+        switch provider {
+        case .google:
+            return "If Google shows Error 403: access_denied, close that tab and check your OAuth consent screen, Audience setting, test-user list, Data Access scope list, and app verification settings."
+        case .microsoft:
+            return nil
+        }
+    }
+
+    private func userVisibleOAuthError(_ error: Error) -> String {
+        let baseMessage: String
+        if let clawError = error as? ClawMailError {
+            baseMessage = clawError.message
+        } else {
+            baseMessage = String(describing: error)
+        }
+
+        let normalized = baseMessage.lowercased()
+        if provider == .google {
+            if normalized.contains("client_secret is missing") {
+                return "Google completed browser sign-in, but the token exchange rejected this OAuth client because no client secret was configured. Paste the Google Client Secret from the same OAuth client into Settings -> API -> OAuth Client IDs, then try again. If you already have one entered, recreate the Google OAuth client as a Desktop app and use the new Client ID + Client Secret pair."
+            }
+            if normalized.contains("access_denied") {
+                return "Google denied the OAuth request. Make sure this is a Google Desktop app client, the project Audience is External if you are testing with a personal Gmail account, your Google account is added as a test user while the consent screen is in Testing, Google Auth platform > Data Access includes the Gmail, Calendar, and Google Contacts CardDAV scope ClawMail requests, and be aware that the Gmail IMAP/SMTP scope used by ClawMail is a restricted Google scope."
+            }
+            if normalized.contains("timed out") {
+                return "Google sign-in timed out. If the browser showed Error 403: access_denied, check that the project Audience is External for personal Gmail testing, add your Google account as a test user on the Google OAuth consent screen, and retry."
+            }
+        }
+
+        return baseMessage
     }
 }

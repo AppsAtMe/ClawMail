@@ -40,6 +40,9 @@ struct ConnectionTestView: View {
     let authMaterial: ConnectionTestAuthMaterial
 
     private let timeoutSeconds = 15
+    private let googleCalendarScope = "https://www.googleapis.com/auth/calendar"
+    private let googleCardDAVScope = "https://www.google.com/m8/feeds"
+    private let googleModernContactsScope = "https://www.googleapis.com/auth/contacts"
 
     var body: some View {
         VStack(spacing: 16) {
@@ -153,24 +156,36 @@ struct ConnectionTestView: View {
 
             // Test CalDAV (optional)
             if let caldavURL = account.caldavURL {
-                await addResult(service: "CalDAV", test: {
-                    let client = try CalDAVClient(
-                        baseURL: caldavURL,
-                        credential: authMaterial.calDAVCredential(email: account.emailAddress)
-                    )
-                    try await client.authenticate()
-                })
+                if let scopeFailure = googleOAuthScopeFailureResult(for: "CalDAV") {
+                    await MainActor.run {
+                        results.append(scopeFailure)
+                    }
+                } else {
+                    await addResult(service: "CalDAV", test: {
+                        let client = try CalDAVClient(
+                            baseURL: caldavURL,
+                            credential: authMaterial.calDAVCredential(email: account.emailAddress)
+                        )
+                        try await client.authenticate()
+                    })
+                }
             }
 
             // Test CardDAV (optional)
             if let carddavURL = account.carddavURL {
-                await addResult(service: "CardDAV", test: {
-                    let client = try CardDAVClient(
-                        baseURL: carddavURL,
-                        credential: authMaterial.cardDAVCredential(email: account.emailAddress)
-                    )
-                    try await client.authenticate()
-                })
+                if let scopeFailure = googleOAuthScopeFailureResult(for: "CardDAV") {
+                    await MainActor.run {
+                        results.append(scopeFailure)
+                    }
+                } else {
+                    await addResult(service: "CardDAV", test: {
+                        let client = try CardDAVClient(
+                            baseURL: carddavURL,
+                            credential: authMaterial.cardDAVCredential(email: account.emailAddress)
+                        )
+                        try await client.authenticate()
+                    })
+                }
             }
 
             await MainActor.run {
@@ -187,10 +202,12 @@ struct ConnectionTestView: View {
         let result: Result<Void, Error> = await withCheckedContinuation { continuation in
             let gate = OnceGate()
             let timeoutWorkItem = DispatchWorkItem {
-                if gate.claim() {
-                    continuation.resume(returning: .failure(
-                        ClawMailError.connectionError("Connection timed out after \(timeoutSeconds) seconds")
-                    ))
+                Task { @MainActor in
+                    if gate.claim() {
+                        continuation.resume(returning: .failure(
+                            ClawMailError.connectionError("Connection timed out after \(timeoutSeconds) seconds")
+                        ))
+                    }
                 }
             }
 
@@ -198,14 +215,18 @@ struct ConnectionTestView: View {
             Task {
                 do {
                     try await test()
-                    if gate.claim() {
-                        timeoutWorkItem.cancel()
-                        continuation.resume(returning: .success(()))
+                    await MainActor.run {
+                        if gate.claim() {
+                            timeoutWorkItem.cancel()
+                            continuation.resume(returning: .success(()))
+                        }
                     }
                 } catch {
-                    if gate.claim() {
-                        timeoutWorkItem.cancel()
-                        continuation.resume(returning: .failure(error))
+                    await MainActor.run {
+                        if gate.claim() {
+                            timeoutWorkItem.cancel()
+                            continuation.resume(returning: .failure(error))
+                        }
                     }
                 }
             }
@@ -257,16 +278,86 @@ struct ConnectionTestView: View {
                     linkURL: URL(string: "https://support.apple.com/121539")
                 )
             case .google:
+                if case .oauth2 = account.authMethod {
+                    if normalized.contains("insufficient authentication scopes") {
+                        if service == "CalDAV" {
+                            return RecoverySuggestion(
+                                text: preciseGoogleScopeRecoveryText(
+                                    serviceLabel: "Calendar",
+                                    requiredScope: googleCalendarScope
+                                ),
+                                linkTitle: "Open Google OAuth consent screen instructions",
+                                linkURL: URL(string: "https://developers.google.com/workspace/guides/configure-oauth-consent")
+                            )
+                        }
+                        if service == "CardDAV" {
+                            return RecoverySuggestion(
+                                text: preciseGoogleScopeRecoveryText(
+                                    serviceLabel: "Contacts",
+                                    requiredScope: googleCardDAVScope
+                                ),
+                                linkTitle: "Open Google OAuth consent screen instructions",
+                                linkURL: URL(string: "https://developers.google.com/workspace/guides/configure-oauth-consent")
+                            )
+                        }
+                    }
+                    if normalized.contains("did not grant calendar access") {
+                        return RecoverySuggestion(
+                            text: "Try this: retry Google browser sign-in and make sure Calendar access is granted on the consent screen. In Google Cloud Console, Google Auth platform > Data Access should also list the Calendar scope for this app.",
+                            linkTitle: "Open Google OAuth consent screen instructions",
+                            linkURL: URL(string: "https://developers.google.com/workspace/guides/configure-oauth-consent")
+                        )
+                    }
+                    if normalized.contains("did not grant contacts access") {
+                        return RecoverySuggestion(
+                            text: "Try this: retry Google browser sign-in and make sure Contacts access is granted on the consent screen. In Google Cloud Console, Google Auth platform > Data Access should also list Google's legacy CardDAV contacts scope `\(googleCardDAVScope)` for this app.",
+                            linkTitle: "Open Google OAuth consent screen instructions",
+                            linkURL: URL(string: "https://developers.google.com/workspace/guides/configure-oauth-consent")
+                        )
+                    }
+                    if service == "CalDAV" {
+                        return RecoverySuggestion(
+                            text: "Try this: Gmail mail OAuth is working, but Google Calendar DAV is still returning 403. Confirm `CalDAV API` (`caldav.googleapis.com`) is enabled in this same Google Cloud project, and retry browser sign-in if Calendar access was not granted on the consent screen.",
+                            linkTitle: "Open CalDAV API in Google Cloud Console",
+                            linkURL: URL(string: "https://console.cloud.google.com/apis/library/caldav.googleapis.com")
+                        )
+                    }
+                    if service == "CardDAV" {
+                        return RecoverySuggestion(
+                            text: "Try this: Gmail mail OAuth is working, but Google Contacts DAV is still returning 403. Google CardDAV expects the legacy Google Contacts scope `\(googleCardDAVScope)`. Re-run Google browser sign-in on the latest build so ClawMail can request that scope, then confirm Google Auth platform > Data Access includes it for this app.",
+                            linkTitle: "Open Google OAuth consent screen instructions",
+                            linkURL: URL(string: "https://developers.google.com/workspace/guides/configure-oauth-consent")
+                        )
+                    }
+                    return RecoverySuggestion(
+                        text: "Try this: confirm the Google OAuth client ID and secret in Settings > API, then sign in again so ClawMail gets fresh browser tokens.",
+                        linkTitle: nil,
+                        linkURL: nil
+                    )
+                }
                 return RecoverySuggestion(
                     text: "Try this: Gmail rejects normal account passwords here. Use an app password or switch to the Google browser sign-in option.",
                     linkTitle: nil,
                     linkURL: nil
                 )
             case .microsoft:
+                if case .oauth2 = account.authMethod {
+                    return RecoverySuggestion(
+                        text: "Try this: confirm the Microsoft OAuth client ID and secret in Settings > API and make sure the app has Outlook IMAP and SMTP delegated permissions.",
+                        linkTitle: nil,
+                        linkURL: nil
+                    )
+                }
                 return RecoverySuggestion(
                     text: "Try this: for Microsoft 365 / Outlook, prefer the browser sign-in option. If you are testing password auth, confirm the tenant still allows it.",
                     linkTitle: nil,
                     linkURL: nil
+                )
+            case .fastmail:
+                return RecoverySuggestion(
+                    text: "Try this: use a Fastmail app password instead of your account password for third-party mail, calendar, and contacts access.",
+                    linkTitle: "Open Fastmail instructions",
+                    linkURL: URL(string: "https://www.fastmail.help/hc/en-us/articles/360058752854")
                 )
             case .none:
                 return RecoverySuggestion(
@@ -296,6 +387,63 @@ struct ConnectionTestView: View {
         return nil
     }
 
+    private func preciseGoogleScopeRecoveryText(serviceLabel: String, requiredScope: String) -> String {
+        let diagnostic: String
+        if let grantedScopes = authMaterial.grantedGoogleScopes(), !grantedScopes.isEmpty {
+            let formattedScopes = grantedScopes.sorted().joined(separator: ", ")
+            if authMaterial.grantsGoogleScope(requiredScope) == true {
+                diagnostic = "ClawMail saw Google grant `\(requiredScope)`. If Google still says the token has insufficient scopes, stop here and send this result back because ClawMail may need a Google-specific scope adjustment for \(serviceLabel.lowercased()) access. Granted scopes: \(formattedScopes)."
+            } else if requiredScope == googleCardDAVScope,
+                      authMaterial.grantsGoogleScope(googleModernContactsScope) == true {
+                diagnostic = "ClawMail saw Google grant the newer Contacts scope `\(googleModernContactsScope)`, but Google CardDAV still rejected the token. That strongly suggests this Google CardDAV flow needs the legacy Contacts scope `\(googleCardDAVScope)` instead. Granted scopes: \(formattedScopes)."
+            } else {
+                diagnostic = "ClawMail did not receive the required Google scope `\(requiredScope)`. Granted scopes were: \(formattedScopes)."
+            }
+        } else {
+            diagnostic = "ClawMail could not confirm the granted Google scopes from the token response, so the safest next step is to re-run browser sign-in after checking Google Auth platform > Data Access."
+        }
+
+        return "Try this: go Back and run Google browser sign-in again after confirming Google Auth platform > Data Access includes the \(serviceLabel) scope `\(requiredScope)`. Retry Test reuses the same token and will not fix a scope issue by itself. \(diagnostic)"
+    }
+
+    private func googleOAuthScopeFailureResult(for service: String) -> ConnectionTestResult? {
+        guard case .google? = inferredProvider,
+              case .oauth2 = account.authMethod else {
+            return nil
+        }
+
+        let missingScope: String?
+        let missingScopeLabel: String
+        switch service {
+        case "CalDAV":
+            missingScope = authMaterial.grantsGoogleScope(googleCalendarScope) == false ? googleCalendarScope : nil
+            missingScopeLabel = "Calendar"
+        case "CardDAV":
+            missingScope = authMaterial.grantsGoogleScope(googleCardDAVScope) == false ? googleCardDAVScope : nil
+            missingScopeLabel = "Contacts"
+        default:
+            return nil
+        }
+
+        guard let missingScope else { return nil }
+        let message: String
+        if service == "CardDAV", authMaterial.grantsGoogleScope(googleModernContactsScope) == true {
+            message = "Authentication failed: Google browser sign-in granted the newer Contacts scope, but not the legacy Google CardDAV contacts scope."
+        } else {
+            message = "Authentication failed: Google browser sign-in did not grant \(missingScopeLabel) access."
+        }
+        return ConnectionTestResult(
+            service: service,
+            passed: false,
+            message: message,
+            recoverySuggestion: RecoverySuggestion(
+                text: "Try this: retry Google browser sign-in and make sure \(missingScopeLabel) access is granted. In Google Cloud Console, Google Auth platform > Data Access should also include `\(missingScope)` for this app.",
+                linkTitle: "Open Google OAuth consent screen instructions",
+                linkURL: URL(string: "https://developers.google.com/workspace/guides/configure-oauth-consent")
+            )
+        )
+    }
+
     private var inferredProvider: KnownProvider? {
         switch (account.imapHost.lowercased(), account.smtpHost.lowercased()) {
         case ("imap.mail.me.com", "smtp.mail.me.com"):
@@ -304,6 +452,8 @@ struct ConnectionTestView: View {
             return .google
         case ("outlook.office365.com", "smtp.office365.com"):
             return .microsoft
+        case ("imap.fastmail.com", "smtp.fastmail.com"):
+            return .fastmail
         default:
             return nil
         }
@@ -326,4 +476,5 @@ private enum KnownProvider {
     case appleICloud
     case google
     case microsoft
+    case fastmail
 }

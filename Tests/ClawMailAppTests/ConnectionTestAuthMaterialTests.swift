@@ -77,4 +77,20 @@ struct ConnectionTestAuthMaterialTests {
             Issue.record("Expected CardDAV OAuth credentials")
         }
     }
+
+    @Test func oauthMaterialExposesGrantedGoogleScopes() {
+        let tokens = OAuthTokens(
+            accessToken: "access-token",
+            refreshToken: "refresh-token",
+            expiresAt: Date().addingTimeInterval(3600),
+            grantedScopes: [
+                "https://mail.google.com/",
+                "https://www.googleapis.com/auth/calendar",
+            ]
+        )
+        let material = ConnectionTestAuthMaterial.oauth2(tokens)
+
+        #expect(material.grantsGoogleScope("https://www.googleapis.com/auth/calendar") == true)
+        #expect(material.grantsGoogleScope("https://www.google.com/m8/feeds") == false)
+    }
 }

@@ -111,6 +111,311 @@ struct OAuthRefreshTests {
         try await client.authenticate()
     }
 
+    @Test func authorizationCodeExchangeIncludesPKCEVerifier() async throws {
+        let session = makeSession()
+        let keychainManager = KeychainManager(serviceName: "com.clawmail.tests.oauth-pkce.\(UUID().uuidString)")
+        let manager = OAuth2Manager(keychainManager: keychainManager, session: session)
+        let pkce = OAuth2Manager.generatePKCEChallenge()
+        let redirectURI = "http://127.0.0.1:12345/oauth/callback"
+
+        await manager.setConfig(
+            OAuthConfig(
+                clientId: "google-client",
+                clientSecret: nil,
+                authorizationEndpoint: URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!,
+                tokenEndpoint: URL(string: "https://oauth2.googleapis.com/token")!,
+                scopes: ["https://mail.google.com/"],
+                redirectURI: redirectURI
+            ),
+            for: .google
+        )
+
+        MockOAuthURLProtocol.enqueue { request in
+            let body = String(data: requestBody(for: request), encoding: .utf8) ?? ""
+            #expect(body.contains("grant_type=authorization_code"))
+            #expect(body.contains("code=auth-code"))
+            #expect(body.contains("client_id=google-client"))
+            #expect(body.contains("code_verifier=\(pkce.verifier)"))
+
+            return self.response(
+                url: request.url!,
+                status: 200,
+                body: """
+                {"access_token":"fresh-token","refresh_token":"refresh-token","expires_in":3600}
+                """
+            )
+        }
+
+        let tokens = try await manager.exchangeCodeForTokens(
+            code: "auth-code",
+            provider: .google,
+            redirectURI: redirectURI,
+            codeVerifier: pkce.verifier
+        )
+
+        #expect(tokens.accessToken == "fresh-token")
+        #expect(tokens.refreshToken == "refresh-token")
+    }
+
+    @Test func authorizationCodeExchangeCapturesGrantedScopes() async throws {
+        let session = makeSession()
+        let keychainManager = KeychainManager(serviceName: "com.clawmail.tests.oauth-granted-scopes.\(UUID().uuidString)")
+        let manager = OAuth2Manager(keychainManager: keychainManager, session: session)
+        let redirectURI = "http://127.0.0.1:12345/oauth/callback"
+
+        await manager.setConfig(
+            OAuthConfig(
+                clientId: "google-client",
+                clientSecret: nil,
+                authorizationEndpoint: URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!,
+                tokenEndpoint: URL(string: "https://oauth2.googleapis.com/token")!,
+                scopes: [
+                    "https://mail.google.com/",
+                    "https://www.googleapis.com/auth/calendar",
+                    "https://www.google.com/m8/feeds",
+                ],
+                redirectURI: redirectURI
+            ),
+            for: .google
+        )
+
+        MockOAuthURLProtocol.enqueue { request in
+            let body = String(data: requestBody(for: request), encoding: .utf8) ?? ""
+            #expect(body.contains("grant_type=authorization_code"))
+
+            return self.response(
+                url: request.url!,
+                status: 200,
+                body: """
+                {"access_token":"fresh-token","refresh_token":"refresh-token","expires_in":3600,"scope":"https://mail.google.com/ https://www.googleapis.com/auth/calendar"}
+                """
+            )
+        }
+
+        let tokens = try await manager.exchangeCodeForTokens(
+            code: "auth-code",
+            provider: .google,
+            redirectURI: redirectURI
+        )
+
+        #expect(tokens.grantedScopes == [
+            "https://mail.google.com/",
+            "https://www.googleapis.com/auth/calendar",
+        ])
+        #expect(tokens.grantsScope("https://www.googleapis.com/auth/calendar") == true)
+        #expect(tokens.grantsScope("https://www.google.com/m8/feeds") == false)
+    }
+
+    @Test func authorizationCodeExchangeCapturesAuthorizedGoogleEmailFromIDToken() async throws {
+        let session = makeSession()
+        let keychainManager = KeychainManager(serviceName: "com.clawmail.tests.oauth-id-token.\(UUID().uuidString)")
+        let manager = OAuth2Manager(keychainManager: keychainManager, session: session)
+        let redirectURI = "http://127.0.0.1:12345/oauth/callback"
+
+        await manager.setConfig(
+            OAuthConfig(
+                clientId: "google-client",
+                clientSecret: nil,
+                authorizationEndpoint: URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!,
+                tokenEndpoint: URL(string: "https://oauth2.googleapis.com/token")!,
+                scopes: [
+                    "openid",
+                    "email",
+                    "https://mail.google.com/",
+                    "https://www.google.com/m8/feeds",
+                ],
+                redirectURI: redirectURI
+            ),
+            for: .google
+        )
+
+        MockOAuthURLProtocol.enqueue { request in
+            let body = String(data: requestBody(for: request), encoding: .utf8) ?? ""
+            #expect(body.contains("grant_type=authorization_code"))
+
+            return self.response(
+                url: request.url!,
+                status: 200,
+                body: """
+                {"access_token":"fresh-token","refresh_token":"refresh-token","expires_in":3600,"id_token":"\(self.mockGoogleIDToken(clientId: "google-client", email: "authorized@gmail.com", subject: "google-subject-123"))"}
+                """
+            )
+        }
+
+        let tokens = try await manager.exchangeCodeForTokens(
+            code: "auth-code",
+            provider: .google,
+            redirectURI: redirectURI
+        )
+
+        #expect(tokens.authorizedEmail == "authorized@gmail.com")
+        #expect(tokens.identity?.subject == "google-subject-123")
+        #expect(tokens.identity?.emailVerified == true)
+    }
+
+    @Test func authorizationCodeExchangeIncludesClientSecretWhenConfigured() async throws {
+        let session = makeSession()
+        let keychainManager = KeychainManager(serviceName: "com.clawmail.tests.oauth-client-secret.\(UUID().uuidString)")
+        let manager = OAuth2Manager(keychainManager: keychainManager, session: session)
+        let redirectURI = "http://127.0.0.1:12345/oauth/callback"
+
+        await manager.setConfig(
+            OAuthConfig(
+                clientId: "google-client",
+                clientSecret: "desktop-secret",
+                authorizationEndpoint: URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!,
+                tokenEndpoint: URL(string: "https://oauth2.googleapis.com/token")!,
+                scopes: ["https://mail.google.com/"],
+                redirectURI: redirectURI
+            ),
+            for: .google
+        )
+
+        MockOAuthURLProtocol.enqueue { request in
+            let body = String(data: requestBody(for: request), encoding: .utf8) ?? ""
+            #expect(body.contains("grant_type=authorization_code"))
+            #expect(body.contains("code=auth-code"))
+            #expect(body.contains("client_id=google-client"))
+            #expect(body.contains("client_secret=desktop-secret"))
+
+            return self.response(
+                url: request.url!,
+                status: 200,
+                body: """
+                {"access_token":"fresh-token","refresh_token":"refresh-token","expires_in":3600}
+                """
+            )
+        }
+
+        let tokens = try await manager.exchangeCodeForTokens(
+            code: "auth-code",
+            provider: .google,
+            redirectURI: redirectURI
+        )
+
+        #expect(tokens.accessToken == "fresh-token")
+        #expect(tokens.refreshToken == "refresh-token")
+    }
+
+    @Test func authorizationURLIncludesPKCEChallenge() async throws {
+        let keychainManager = KeychainManager(serviceName: "com.clawmail.tests.oauth-pkce-url.\(UUID().uuidString)")
+        let manager = OAuth2Manager(keychainManager: keychainManager)
+        let pkce = OAuth2Manager.generatePKCEChallenge()
+
+        await manager.setConfig(
+            OAuthConfig(
+                clientId: "google-client",
+                clientSecret: nil,
+                authorizationEndpoint: URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!,
+                tokenEndpoint: URL(string: "https://oauth2.googleapis.com/token")!,
+                scopes: ["https://mail.google.com/"],
+                redirectURI: "http://127.0.0.1:54321/oauth/callback"
+            ),
+            for: .google
+        )
+
+        let url = try await manager.buildAuthorizationURL(
+            provider: .google,
+            state: "state-123",
+            codeChallenge: pkce.challenge
+        )
+        let items = Dictionary(uniqueKeysWithValues: URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.map {
+            ($0.name, $0.value ?? "")
+        } ?? [])
+
+        #expect(items["code_challenge"] == pkce.challenge)
+        #expect(items["code_challenge_method"] == "S256")
+        #expect(items["state"] == "state-123")
+    }
+
+    @Test func authorizationURLIncludesGoogleLoginHint() async throws {
+        let keychainManager = KeychainManager(serviceName: "com.clawmail.tests.oauth-login-hint.\(UUID().uuidString)")
+        let manager = OAuth2Manager(keychainManager: keychainManager)
+
+        await manager.setConfig(
+            OAuthConfig(
+                clientId: "google-client",
+                clientSecret: nil,
+                authorizationEndpoint: URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!,
+                tokenEndpoint: URL(string: "https://oauth2.googleapis.com/token")!,
+                scopes: ["openid", "email", "https://mail.google.com/"],
+                redirectURI: "http://127.0.0.1:54321/oauth/callback"
+            ),
+            for: .google
+        )
+
+        let url = try await manager.buildAuthorizationURL(
+            provider: .google,
+            state: "state-123",
+            loginHint: " user@gmail.com "
+        )
+        let items = Dictionary(uniqueKeysWithValues: URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.map {
+            ($0.name, $0.value ?? "")
+        } ?? [])
+
+        #expect(items["login_hint"] == "user@gmail.com")
+    }
+
+    @Test func refreshPreservesStoredIdentityWhenRefreshResponseOmitsIDToken() async throws {
+        let session = makeSession()
+        let accountId = UUID()
+        let keychainManager = KeychainManager(serviceName: "com.clawmail.tests.oauth-refresh-identity.\(UUID().uuidString)")
+        defer {
+            Task {
+                try? await keychainManager.deleteAll(accountId: accountId)
+            }
+        }
+        let manager = OAuth2Manager(keychainManager: keychainManager, session: session)
+
+        await manager.setConfig(
+            OAuthConfig(
+                clientId: "google-client",
+                clientSecret: nil,
+                authorizationEndpoint: URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!,
+                tokenEndpoint: URL(string: "https://oauth2.googleapis.com/token")!,
+                scopes: ["openid", "email", "https://mail.google.com/"],
+                redirectURI: "http://127.0.0.1:54321/oauth/callback"
+            ),
+            for: .google
+        )
+
+        try await keychainManager.saveOAuthTokens(
+            accountId: accountId,
+            tokens: OAuthTokens(
+                accessToken: "stale-token",
+                refreshToken: "refresh-token",
+                expiresAt: .distantPast,
+                grantedScopes: ["https://mail.google.com/"],
+                identity: OAuthIdentity(subject: "google-subject-123", email: "authorized@gmail.com", emailVerified: true)
+            )
+        )
+
+        MockOAuthURLProtocol.enqueue { request in
+            let body = String(data: requestBody(for: request), encoding: .utf8) ?? ""
+            #expect(body.contains("grant_type=refresh_token"))
+
+            return self.response(
+                url: request.url!,
+                status: 200,
+                body: """
+                {"access_token":"fresh-token","expires_in":3600}
+                """
+            )
+        }
+
+        let accessToken = try await manager.refreshAccessToken(
+            accountId: accountId,
+            refreshToken: "refresh-token",
+            provider: .google
+        )
+
+        #expect(accessToken == "fresh-token")
+        let storedTokens = await keychainManager.getOAuthTokens(accountId: accountId)
+        #expect(storedTokens?.authorizedEmail == "authorized@gmail.com")
+        #expect(storedTokens?.identity?.subject == "google-subject-123")
+        #expect(storedTokens?.grantedScopes == ["https://mail.google.com/"])
+    }
+
     private func makeSession() -> URLSession {
         MockOAuthURLProtocol.reset()
         let configuration = URLSessionConfiguration.ephemeral
@@ -142,6 +447,14 @@ struct OAuthRefreshTests {
           </d:response>
         </d:multistatus>
         """
+    }
+
+    private func mockGoogleIDToken(clientId: String, email: String, subject: String) -> String {
+        let header = #"{"alg":"none","typ":"JWT"}"#
+        let payload = """
+        {"iss":"https://accounts.google.com","aud":"\(clientId)","sub":"\(subject)","email":"\(email)","email_verified":true}
+        """
+        return "\(base64URLEncode(header))\(Character("."))\(base64URLEncode(payload))\(Character("."))signature"
     }
 }
 
@@ -182,6 +495,14 @@ private actor TokenSequence {
         }
         return tokens.removeFirst()
     }
+}
+
+private func base64URLEncode(_ rawValue: String) -> String {
+    Data(rawValue.utf8)
+        .base64EncodedString()
+        .replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_")
+        .replacingOccurrences(of: "=", with: "")
 }
 
 private final class MockOAuthURLProtocol: URLProtocol, @unchecked Sendable {

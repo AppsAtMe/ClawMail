@@ -11,6 +11,7 @@ enum ProviderChoice: String, CaseIterable {
     case apple = "Apple / iCloud"
     case google = "Google"
     case microsoft = "Microsoft 365 / Outlook"
+    case fastmail = "Fastmail"
     case other = "Other Mail Account"
 
     static let defaultChoice: ProviderChoice = .apple
@@ -20,6 +21,7 @@ enum ProviderChoice: String, CaseIterable {
         case .apple: return "apple.logo"
         case .google: return "envelope.badge.person.crop"
         case .microsoft: return "envelope.badge.shield.half.filled"
+        case .fastmail: return "paperplane.circle"
         case .other: return "server.rack"
         }
     }
@@ -29,11 +31,13 @@ enum ProviderChoice: String, CaseIterable {
         case .apple:
             return "iCloud Mail, Calendar, Contacts, and Reminders with Apple's app-password setup"
         case .google:
-            return "Browser sign-in with Google"
+            return "Browser sign-in with Gmail, Calendar, and Contacts"
         case .microsoft:
-            return "Browser sign-in with Microsoft"
+            return "Browser sign-in with Microsoft mail; DAV support varies"
+        case .fastmail:
+            return "App-password setup with Fastmail mail, calendar, and contacts defaults"
         case .other:
-            return "Manual IMAP and SMTP configuration"
+            return "Manual IMAP, SMTP, and optional DAV configuration"
         }
     }
 
@@ -41,7 +45,7 @@ enum ProviderChoice: String, CaseIterable {
         switch self {
         case .google: return .google
         case .microsoft: return .microsoft
-        case .apple, .other: return nil
+        case .apple, .fastmail, .other: return nil
         }
     }
 
@@ -85,20 +89,48 @@ enum ProviderChoice: String, CaseIterable {
                 smtpPort: "587",
                 smtpSecurity: .starttls
             )
+        case .fastmail:
+            return ProviderServerSettings(
+                imapHost: "imap.fastmail.com",
+                imapPort: "993",
+                imapSecurity: .ssl,
+                smtpHost: "smtp.fastmail.com",
+                smtpPort: "465",
+                smtpSecurity: .ssl
+            )
         case .other:
             return nil
         }
     }
 
-    var davSettings: ProviderDAVSettings? {
+    func defaultDAVSettings(emailAddress: String) -> ProviderDAVSettings? {
         switch self {
         case .apple:
             return ProviderDAVSettings(
                 caldavURL: "https://caldav.icloud.com",
                 carddavURL: "https://contacts.icloud.com"
             )
-        case .google, .microsoft, .other:
+        case .google:
+            return ProviderDAVSettings(
+                caldavURL: Self.googleCalDAVURL(emailAddress: emailAddress),
+                carddavURL: "https://www.googleapis.com/.well-known/carddav"
+            )
+        case .fastmail:
+            return ProviderDAVSettings(
+                caldavURL: "https://caldav.fastmail.com",
+                carddavURL: "https://carddav.fastmail.com"
+            )
+        case .microsoft, .other:
             return nil
+        }
+    }
+
+    var hasPresetDAVServices: Bool {
+        switch self {
+        case .apple, .google, .fastmail:
+            return true
+        case .microsoft, .other:
+            return false
         }
     }
 
@@ -113,8 +145,18 @@ enum ProviderChoice: String, CaseIterable {
                account.smtpHost.caseInsensitiveCompare("smtp.mail.me.com") == .orderedSame {
                 return .apple
             }
+            if account.imapHost.caseInsensitiveCompare("imap.fastmail.com") == .orderedSame,
+               account.smtpHost.caseInsensitiveCompare("smtp.fastmail.com") == .orderedSame {
+                return .fastmail
+            }
             return .other
         }
+    }
+
+    private static func googleCalDAVURL(emailAddress: String) -> String? {
+        let trimmedEmail = emailAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedEmail.isEmpty else { return nil }
+        return "https://apidata.googleusercontent.com/caldav/v2/\(trimmedEmail)/user"
     }
 }
 
@@ -128,8 +170,8 @@ struct ProviderServerSettings: Equatable {
 }
 
 struct ProviderDAVSettings: Equatable {
-    let caldavURL: String
-    let carddavURL: String
+    let caldavURL: String?
+    let carddavURL: String?
 }
 
 enum AccountSetupMode: Equatable {
@@ -236,12 +278,8 @@ struct AccountSetupCredentialState {
     }
 
     var connectionTestAuthMaterial: ConnectionTestAuthMaterial {
-        if let enteredOAuthTokens {
-            return .oauth2(enteredOAuthTokens)
-        }
-
-        if existingOAuthAuthMatches, let storedOAuthTokens {
-            return .oauth2(storedOAuthTokens)
+        if let activeOAuthTokens {
+            return .oauth2(activeOAuthTokens)
         }
 
         if !enteredPassword.isEmpty {
@@ -253,6 +291,22 @@ struct AccountSetupCredentialState {
         }
 
         return .password(enteredPassword)
+    }
+
+    var activeOAuthTokens: OAuthTokens? {
+        if let enteredOAuthTokens {
+            return enteredOAuthTokens
+        }
+
+        if existingOAuthAuthMatches, let storedOAuthTokens {
+            return storedOAuthTokens
+        }
+
+        return nil
+    }
+
+    var authorizedOAuthEmail: String? {
+        activeOAuthTokens?.authorizedEmail
     }
 
     var editCredentialStatus: AccountSetupCredentialStatus? {
@@ -335,7 +389,7 @@ struct AccountSetupView: View {
         let existingAccount = mode.existingAccount
         let inferredProvider = existingAccount.map(ProviderChoice.inferred(from:)) ?? ProviderChoice.defaultChoice
         let serverSettings = inferredProvider.serverSettings
-        let davSettings = inferredProvider.davSettings
+        let davSettings = inferredProvider.defaultDAVSettings(emailAddress: existingAccount?.emailAddress ?? "")
 
         _step = State(initialValue: mode.isEditing ? .credentials : .provider)
         _provider = State(initialValue: inferredProvider)
@@ -366,6 +420,9 @@ struct AccountSetupView: View {
         .frame(width: 520, height: 540)
         .task(id: mode.existingAccount?.id) {
             await preloadStoredCredentialsIfNeeded()
+        }
+        .onChange(of: emailAddress) { oldValue, newValue in
+            syncDerivedDAVDefaults(oldEmailAddress: oldValue, newEmailAddress: newValue)
         }
     }
 
@@ -407,6 +464,7 @@ struct AccountSetupView: View {
                 provider: provider,
                 credentialStatus: credentialState.editCredentialStatus,
                 emailAddress: $emailAddress,
+                authorizedOAuthEmail: credentialState.authorizedOAuthEmail,
                 displayName: $displayName,
                 imapHost: $imapHost,
                 imapPort: $imapPort,
@@ -420,7 +478,7 @@ struct AccountSetupView: View {
                 davValidationError: davURLValidationError,
                 oauthInProgress: $oauthInProgress,
                 onTokensObtained: { tokens in
-                    oauthTokens = tokens
+                    applyOAuthTokens(tokens)
                 }
             )
             .environment(appState)
@@ -533,6 +591,13 @@ struct AccountSetupView: View {
         credentialState.connectionTestAuthMaterial
     }
 
+    private var configuredEmailAddress: String {
+        if provider.usesOAuth, let authorizedOAuthEmail = credentialState.authorizedOAuthEmail {
+            return authorizedOAuthEmail
+        }
+        return emailAddress
+    }
+
     private var credentialState: AccountSetupCredentialState {
         AccountSetupCredentialState(
             existingAccount: mode.existingAccount,
@@ -581,7 +646,7 @@ struct AccountSetupView: View {
         return Account(
             id: existingAccount?.id ?? UUID(),
             label: mode.isEditing ? (existingAccount?.label ?? accountLabel) : (accountLabel.isEmpty ? "setup" : accountLabel),
-            emailAddress: emailAddress,
+            emailAddress: configuredEmailAddress,
             displayName: displayName,
             authMethod: provider.authMethod,
             imapHost: imapHost,
@@ -600,6 +665,7 @@ struct AccountSetupView: View {
 
     private func saveAccount() {
         let account = buildAccountForSave()
+        let initialCredentials = connectionTestAuthMaterial.credentials()
 
         saveInProgress = true
         saveError = nil
@@ -611,9 +677,13 @@ struct AccountSetupView: View {
             do {
                 try await persistCredentials(for: account)
                 if let existingAccount = mode.existingAccount {
-                    try await appState.orchestrator?.updateAccount(label: existingAccount.label, with: account)
+                    try await appState.orchestrator?.updateAccount(
+                        label: existingAccount.label,
+                        with: account,
+                        initialCredentials: initialCredentials
+                    )
                 } else {
-                    try await appState.orchestrator?.addAccount(account)
+                    try await appState.orchestrator?.addAccount(account, initialCredentials: initialCredentials)
                 }
                 await appState.refreshAccounts()
                 await MainActor.run {
@@ -643,7 +713,7 @@ struct AccountSetupView: View {
         return Account(
             id: existingAccount?.id ?? UUID(),
             label: mode.isEditing ? (existingAccount?.label ?? accountLabel) : accountLabel,
-            emailAddress: emailAddress,
+            emailAddress: configuredEmailAddress,
             displayName: displayName,
             authMethod: provider.authMethod,
             imapHost: imapHost,
@@ -678,12 +748,7 @@ struct AccountSetupView: View {
 
         case .oauth2(let oauthProvider):
             if let oauthTokens {
-                try await keychainManager.saveOAuthTokens(
-                    accountId: account.id,
-                    accessToken: oauthTokens.accessToken,
-                    refreshToken: oauthTokens.refreshToken,
-                    expiresAt: oauthTokens.expiresAt
-                )
+                try await keychainManager.saveOAuthTokens(accountId: account.id, tokens: oauthTokens)
             } else if !matchesExistingOAuthAuth(existingAccount, provider: oauthProvider) {
                 throw ClawMailError.authFailed("Complete the browser sign-in before saving changes.")
             }
@@ -753,13 +818,34 @@ struct AccountSetupView: View {
             smtpSecurity = serverSettings.smtpSecurity
         }
 
-        if let davSettings = provider.davSettings {
-            caldavURL = davSettings.caldavURL
-            carddavURL = davSettings.carddavURL
+        if let davSettings = provider.defaultDAVSettings(emailAddress: emailAddress) {
+            caldavURL = davSettings.caldavURL ?? ""
+            carddavURL = davSettings.carddavURL ?? ""
         } else {
             caldavURL = ""
             carddavURL = ""
         }
+    }
+
+    private func syncDerivedDAVDefaults(oldEmailAddress: String, newEmailAddress: String) {
+        let oldDefaults = provider.defaultDAVSettings(emailAddress: oldEmailAddress)
+        let newDefaults = provider.defaultDAVSettings(emailAddress: newEmailAddress)
+        applyDerivedDAVDefault(&caldavURL, oldDefault: oldDefaults?.caldavURL, newDefault: newDefaults?.caldavURL)
+        applyDerivedDAVDefault(&carddavURL, oldDefault: oldDefaults?.carddavURL, newDefault: newDefaults?.carddavURL)
+    }
+
+    private func applyOAuthTokens(_ tokens: OAuthTokens) {
+        oauthTokens = tokens
+        if let authorizedEmail = tokens.authorizedEmail {
+            emailAddress = authorizedEmail
+        }
+    }
+
+    private func applyDerivedDAVDefault(_ value: inout String, oldDefault: String?, newDefault: String?) {
+        let normalizedOldDefault = oldDefault ?? ""
+        let shouldReplace = value.isEmpty || value == normalizedOldDefault
+        guard shouldReplace else { return }
+        value = newDefault ?? ""
     }
 
     private func validatedDAVURL(_ rawValue: String, serviceName: String) -> URL? {
@@ -819,6 +905,7 @@ private struct ProviderSelectionView: View {
                         .foregroundStyle(Color.accentColor)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
             .background(provider == choice ? Color.accentColor.opacity(0.1) : Color.clear)
             .cornerRadius(8)
@@ -826,8 +913,10 @@ private struct ProviderSelectionView: View {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(provider == choice ? Color.accentColor : Color.secondary.opacity(0.3))
             )
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -840,6 +929,7 @@ private struct CredentialsFormView: View {
     let provider: ProviderChoice
     let credentialStatus: AccountSetupCredentialStatus?
     @Binding var emailAddress: String
+    let authorizedOAuthEmail: String?
     @Binding var displayName: String
     @Binding var imapHost: String
     @Binding var imapPort: String
@@ -868,6 +958,7 @@ private struct CredentialsFormView: View {
                     Divider()
                     OAuthFlowView(
                         provider: provider.oauthProvider ?? .google,
+                        loginHint: emailAddress,
                         inProgress: $oauthInProgress,
                         onTokensObtained: onTokensObtained
                     )
@@ -928,8 +1019,33 @@ private struct CredentialsFormView: View {
     private var emailSection: some View {
         Group {
             Text("Email Settings").font(.headline)
-            TextField("Email Address", text: $emailAddress)
-                .textFieldStyle(.roundedBorder)
+            if provider.usesOAuth, let authorizedOAuthEmail {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Authorized Email")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                        Text(authorizedOAuthEmail)
+                            .textSelection(.enabled)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.accentColor.opacity(0.10))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.accentColor.opacity(0.35))
+                    )
+                }
+            } else {
+                TextField("Email Address", text: $emailAddress)
+                    .textFieldStyle(.roundedBorder)
+            }
             TextField("Display Name", text: $displayName)
                 .textFieldStyle(.roundedBorder)
             if !provider.usesOAuth {
@@ -940,13 +1056,26 @@ private struct CredentialsFormView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if provider == .apple {
+                switch provider {
+                case .apple:
                     Text("Use an app-specific password for iCloud Mail when connecting a third-party app.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Link("Create an app-specific password", destination: URL(string: "https://support.apple.com/121539")!)
                         .font(.caption)
+                case .fastmail:
+                    Text("Use a Fastmail app password for third-party mail, calendar, and contacts access.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Link("Create a Fastmail app password", destination: URL(string: "https://www.fastmail.help/hc/en-us/articles/360058752854")!)
+                        .font(.caption)
+                case .google, .microsoft, .other:
+                    EmptyView()
                 }
+            } else if let authorizedOAuthEmail {
+                Text("Browser sign-in verified \(authorizedOAuthEmail). ClawMail will use this address for the account. To switch accounts, run browser sign-in again.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } else if mode.isEditing {
                 Text("Your existing browser sign-in will stay in place unless you complete browser sign-in again.")
                     .font(.caption)
@@ -999,23 +1128,15 @@ private struct CredentialsFormView: View {
 
     private var optionalSection: some View {
         Group {
-            if provider == .apple {
-                Text("iCloud Services").font(.headline).foregroundStyle(.secondary)
-                Text("Calendar, Contacts, and Reminders are preconfigured for Apple accounts. Open Advanced only if you need to override the default iCloud service URLs.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                DisclosureGroup("Advanced Service URLs", isExpanded: $showingAdvancedDAV) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField("CalDAV URL", text: $caldavURL)
-                            .textFieldStyle(.roundedBorder)
-                        TextField("CardDAV URL", text: $carddavURL)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                    .padding(.top, 6)
-                }
+            if provider.hasPresetDAVServices {
+                presetDAVSection
             } else {
                 Text("Optional Services").font(.headline).foregroundStyle(.secondary)
+                if provider == .microsoft {
+                    Text("Mail is preconfigured for Microsoft accounts. Enter CalDAV or CardDAV URLs only if your tenant or provider publishes them.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 TextField("CalDAV URL (optional)", text: $caldavURL)
                     .textFieldStyle(.roundedBorder)
                 TextField("CardDAV URL (optional)", text: $carddavURL)
@@ -1026,6 +1147,39 @@ private struct CredentialsFormView: View {
                     .foregroundStyle(.red)
                     .font(.caption)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var presetDAVSection: some View {
+        switch provider {
+        case .apple:
+            Text("iCloud Services").font(.headline).foregroundStyle(.secondary)
+            Text("Calendar, Contacts, and Reminders are preconfigured for Apple accounts. Open Advanced only if you need to override the default iCloud service URLs.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .google:
+            Text("Google Services").font(.headline).foregroundStyle(.secondary)
+            Text("Contacts use Google's official CardDAV discovery URL. Calendar uses your primary Google Calendar based on the email address above. Google Tasks is not exposed through CalDAV.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .fastmail:
+            Text("Fastmail Services").font(.headline).foregroundStyle(.secondary)
+            Text("Mail, calendar, and contacts are preconfigured for Fastmail. Open Advanced only if you need to override the default Fastmail service URLs.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .microsoft, .other:
+            EmptyView()
+        }
+
+        DisclosureGroup("Advanced Service URLs", isExpanded: $showingAdvancedDAV) {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("CalDAV URL", text: $caldavURL)
+                    .textFieldStyle(.roundedBorder)
+                TextField("CardDAV URL", text: $carddavURL)
+                    .textFieldStyle(.roundedBorder)
+            }
+            .padding(.top, 6)
         }
     }
 }

@@ -30,6 +30,10 @@ public actor KeychainManager {
 
     public func saveOAuthTokens(accountId: UUID, accessToken: String, refreshToken: String, expiresAt: Date) throws {
         let tokens = OAuthTokens(accessToken: accessToken, refreshToken: refreshToken, expiresAt: expiresAt)
+        try saveOAuthTokens(accountId: accountId, tokens: tokens)
+    }
+
+    public func saveOAuthTokens(accountId: UUID, tokens: OAuthTokens) throws {
         let data = try JSONEncoder().encode(tokens)
         guard let string = String(data: data, encoding: .utf8) else {
             throw ClawMailError.serverError("Failed to encode OAuth tokens as UTF-8")

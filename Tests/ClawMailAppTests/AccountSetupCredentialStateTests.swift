@@ -112,4 +112,26 @@ struct AccountSetupCredentialStateTests {
         #expect(state.oauthCredentialsReady == false)
         #expect(state.editCredentialStatus == .browserSignInRequired)
     }
+
+    @Test func activeOAuthTokensExposeAuthorizedEmail() {
+        let tokens = OAuthTokens(
+            accessToken: "access-token",
+            refreshToken: "refresh-token",
+            expiresAt: Date().addingTimeInterval(3600),
+            identity: OAuthIdentity(subject: "google-subject-123", email: "authorized@gmail.com", emailVerified: true)
+        )
+
+        let state = AccountSetupCredentialState(
+            existingAccount: nil,
+            provider: .google,
+            enteredPassword: "",
+            enteredOAuthTokens: tokens,
+            storedPassword: nil,
+            storedOAuthTokens: nil,
+            storedCredentialsDidLoad: true
+        )
+
+        #expect(state.activeOAuthTokens?.authorizedEmail == "authorized@gmail.com")
+        #expect(state.authorizedOAuthEmail == "authorized@gmail.com")
+    }
 }

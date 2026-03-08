@@ -99,18 +99,53 @@ public enum ConnectionStatus: Codable, Sendable, Equatable {
 
 // MARK: - OAuthTokens
 
+public struct OAuthIdentity: Codable, Sendable, Equatable {
+    public var subject: String
+    public var email: String?
+    public var emailVerified: Bool?
+
+    public init(subject: String, email: String? = nil, emailVerified: Bool? = nil) {
+        self.subject = subject
+        self.email = email
+        self.emailVerified = emailVerified
+    }
+}
+
 public struct OAuthTokens: Codable, Sendable {
     public var accessToken: String
     public var refreshToken: String
     public var expiresAt: Date
+    public var grantedScopes: [String]?
+    public var identity: OAuthIdentity?
 
-    public init(accessToken: String, refreshToken: String, expiresAt: Date) {
+    public init(
+        accessToken: String,
+        refreshToken: String,
+        expiresAt: Date,
+        grantedScopes: [String]? = nil,
+        identity: OAuthIdentity? = nil
+    ) {
         self.accessToken = accessToken
         self.refreshToken = refreshToken
         self.expiresAt = expiresAt
+        self.grantedScopes = grantedScopes
+        self.identity = identity
     }
 
     public var isExpired: Bool {
         Date() >= expiresAt
+    }
+
+    public func grantsScope(_ scope: String) -> Bool? {
+        guard let grantedScopes else { return nil }
+        return Set(grantedScopes).contains(scope)
+    }
+
+    public var authorizedEmail: String? {
+        guard let email = identity?.email?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !email.isEmpty else {
+            return nil
+        }
+        return email
     }
 }

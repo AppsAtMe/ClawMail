@@ -166,7 +166,10 @@ struct OAuthHelpersTests {
         #expect(oauth.authorizationEndpoint.host == "accounts.google.com")
         #expect(oauth.tokenEndpoint.host == "oauth2.googleapis.com")
         #expect(oauth.redirectURI == "http://127.0.0.1:12345/oauth/callback")
+        #expect(oauth.scopes.contains("openid"))
+        #expect(oauth.scopes.contains("email"))
         #expect(oauth.scopes.contains("https://mail.google.com/"))
+        #expect(oauth.scopes.contains("https://www.google.com/m8/feeds"))
     }
 
     @Test func oauthConfigForMicrosoftUsesCorrectEndpoints() {
@@ -182,8 +185,11 @@ struct OAuthHelpersTests {
         #expect(oauth.clientSecret == "ms-secret")
         #expect(oauth.authorizationEndpoint.host == "login.microsoftonline.com")
         #expect(oauth.tokenEndpoint.host == "login.microsoftonline.com")
-        #expect(oauth.scopes.contains("IMAP.AccessAsUser.All"))
-        #expect(oauth.scopes.contains("offline_access"))
+        #expect(oauth.scopes == [
+            "offline_access",
+            "https://outlook.office.com/IMAP.AccessAsUser.All",
+            "https://outlook.office.com/SMTP.Send",
+        ])
     }
 
     @Test func oauthConfigDefaultsToEmptyClientId() {

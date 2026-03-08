@@ -1,16 +1,104 @@
 # ClawMail Code Review Handoff
 
-Date: March 7, 2026
+Date: March 8, 2026
 Repository: `/Users/andrewrmitchell/Developer/ClawMail`
 Purpose: Carry forward a full review into a fresh session with enough context to fix issues without re-reading the entire repo.
 
 ## Fresh Session Starting Point
 
-- Pre-handoff checkpoint: `7027ec6` (`Finish account edit polish and quiet NIO warnings`)
-- Worktree state at handoff write time: clean
-- Best restart point: begin from the newest commit that contains this handoff note, then continue provider verification with Google OAuth, generic IMAP/SMTP + DAV, and Microsoft OAuth
+- Pre-handoff checkpoint before the Google/provider push: `7027ec6` (`Finish account edit polish and quiet NIO warnings`)
+- Best restart point: begin from the newest commit that contains this handoff note, then continue from the unresolved Google CardDAV finding described in the current latest update below
+- Current user-testing status: Apple / iCloud is verified by hand; Google OAuth mail + calendar are working; Google CardDAV is still blocked; Fastmail and Microsoft manual verification remain to do
 
 ## Session Update (March 7, 2026, current latest)
+
+This handoff now reflects the provider-verification push after Apple was verified, including the Google OAuth crash fixes, account-binding improvements, and the still-open Google CardDAV scope issue.
+
+Completed in this session:
+- Added first-class provider behavior for Google, Microsoft 365 / Outlook, and Fastmail so the setup sheet is no longer Apple-only polished.
+- Made the Google provider row use a full-width hit target instead of only reacting near the mail icon.
+- Fixed multiple OAuth crash/timeout paths in `OAuthCallbackServer` and the connection-test UI, including the `dispatch_assert_queue` / main-actor isolation crash seen after the Google browser flow completed.
+- Added PKCE to the desktop OAuth flow and hardened callback-server cleanup, timeout, and provider-error handling.
+- Corrected Microsoft OAuth scopes to use Outlook's real IMAP/SMTP delegated scopes.
+- Clarified the API settings UI so `Client ID` and `Client Secret` are explained as values created in Google Cloud / Microsoft Entra, not app-generated values.
+- Reduced spurious first-save Keychain prompts by reusing in-memory credentials for the initial connect path instead of immediately round-tripping through Keychain.
+- Added granted-scope diagnostics to Google connection failures so the app now distinguishes “Google did not grant the scope” from “Google granted something, but CardDAV still rejected the token.”
+- Bound the authorized Google identity back into setup: the typed email is now only a `login_hint`, and after browser sign-in ClawMail reads the authorized email from Google’s `id_token`, replaces the field with that verified address, and uses it for account save / Google CalDAV defaults.
+- Replaced the dimmed OAuth email field with an explicit `Authorized Email` banner after sign-in so the verified-account state is obvious again.
+- Updated Google setup docs throughout the app, README, checklist, and recovery copy.
+- Added branding assets and wiring for the new app icon / splash artwork, plus the helper script and source-artwork files used to generate them.
+
+What was manually verified this session:
+- Google browser sign-in no longer crashes the app.
+- Google IMAP and SMTP connect successfully.
+- Google CalDAV connects successfully.
+- The authorized Google email is now surfaced in the UI instead of silently trusting the manually typed address.
+
+Open blocker at handoff:
+- Google CardDAV still fails even after the broader OAuth hardening work.
+- Evidence from the March 7, 2026 6:25 PM screenshot:
+  ClawMail showed `Request had insufficient authentication scopes` while also reporting that Google granted `https://www.googleapis.com/auth/contacts`.
+- Interpretation:
+  The newer People API contacts scope appears insufficient for Google CardDAV.
+- Follow-up change already implemented after that evidence:
+  ClawMail now requests the legacy Google Contacts/CardDAV scope `https://www.google.com/m8/feeds` instead, updates the diagnostics accordingly, and tells the user to re-run browser sign-in instead of just pressing `Retry Test`.
+- Evidence from the March 7, 2026 6:44 PM screenshot after the user manually added feeds in Google Cloud:
+  ClawMail still reported `Authentication failed: Google browser sign-in granted the newer Contacts scope, but not the legacy Google CardDAV contacts scope.`
+- Current interpretation:
+  either Google Auth platform `Data Access` is not actually adding `https://www.google.com/m8/feeds` to the installed-app consent flow, or Google’s current desktop/OAuth UI requires a different CardDAV permission strategy than the one we are using.
+
+Most useful next step for a fresh session:
+1. Re-check the current Google CardDAV docs and current Google OAuth/Data Access docs from primary sources.
+2. Confirm whether `https://www.google.com/m8/feeds` is still the required Google CardDAV scope for installed apps in March 2026, or whether Google now expects a different scope or consent-screen configuration.
+3. If the scope is correct, instrument/log the exact authorization URL and exact token response scope list during a fresh Google sign-in to verify whether Google is silently dropping the legacy scope.
+4. If Google is dropping the scope, inspect whether the consent-screen configuration or app-verification state is filtering it out.
+
+Small UX follow-up captured from manual testing:
+- The earlier `Quitting...` feedback in the menu bar apparently felt less prominent in later manual testing; the user described it as no longer reading as a strong status message, more like a light highlight. This was not root-caused in this session and may need a quick visual re-check in the next one.
+
+Current build/test/install status after these fixes:
+- `swift test`: passed
+- Test suite reported 220 passing tests across 32 suites
+- `swift build -c release`: passed
+- `make install`: passed
+- Updated app bundle installed to `/Applications/ClawMail.app`
+
+New tests added in this push:
+- `Tests/ClawMailCoreTests/OAuthCallbackServerTests.swift`
+- `Tests/ClawMailAppTests/AccountSetupCredentialStateTests.swift`
+- `Tests/ClawMailCoreTests/OAuthRefreshTests.swift` gained PKCE, granted-scope, login-hint, authorized-email, and refresh-preserves-identity coverage
+- `Tests/ClawMailCoreTests/DAVSecurityTests.swift` gained CardDAV redirect/auth-detail coverage
+- `Tests/ClawMailAppTests/ConnectionTestAuthMaterialTests.swift` and `Tests/ClawMailAppTests/AccountSetupProviderTests.swift` gained Google/provider coverage
+
+Key implementation files changed in this push:
+- `Makefile`
+- `Package.swift`
+- `Sources/ClawMailApp/Account/AccountSetupView.swift`
+- `Sources/ClawMailApp/Account/ConnectionTestAuthMaterial.swift`
+- `Sources/ClawMailApp/Account/ConnectionTestView.swift`
+- `Sources/ClawMailApp/Account/OAuthFlowView.swift`
+- `Sources/ClawMailApp/Settings/APITab.swift`
+- `Sources/ClawMailCore/AccountOrchestrator.swift`
+- `Sources/ClawMailCore/Auth/KeychainManager.swift`
+- `Sources/ClawMailCore/Auth/OAuth2Manager.swift`
+- `Sources/ClawMailCore/Auth/OAuthCallbackServer.swift`
+- `Sources/ClawMailCore/Auth/OAuthHelpers.swift`
+- `Sources/ClawMailCore/Contacts/CardDAVClient.swift`
+- `Sources/ClawMailCore/Models/Account.swift`
+- `Sources/ClawMailApp/Resources/AppIcon.icns`
+- `Sources/ClawMailApp/Resources/Branding/*`
+- `Sources/ClawMailApp/Shared/BrandingAsset.swift`
+- `scripts/generate_brand_assets.py`
+- `Design/SourceArtwork/*`
+- `README.md`
+- `docs/account-verification-checklist.md`
+- `docs/code-review-handoff.md`
+
+Next issue to start with:
+- Finish the Google CardDAV investigation described above.
+- After Google is either fixed or conclusively classified as a current Google-platform limitation, continue human verification with Fastmail and Microsoft OAuth.
+
+## Session Update (March 7, 2026, previous latest)
 
 This handoff now reflects the follow-up polish pass after the account-edit checkpoint.
 

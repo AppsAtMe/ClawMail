@@ -145,9 +145,27 @@ struct APITab: View {
             }
 
             Section("OAuth Client IDs") {
-                Text("Register your app at the Google Cloud Console or Azure AD portal, then enter the credentials here.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("These values come from OAuth app registrations you create with Google or Microsoft. ClawMail does not generate them for you.")
+                    Text("Google: Google Cloud Console -> Google Auth platform -> Clients -> Create Client -> Desktop app. Paste the resulting Client ID here.")
+                    Link("Open Google OAuth client instructions", destination: URL(string: "https://developers.google.com/workspace/guides/create-credentials")!)
+                    Text("If your Google OAuth consent screen is in Testing, add your Google account as a test user or Google will return Error 403: access_denied.")
+                    Link("Open Google OAuth consent screen instructions", destination: URL(string: "https://developers.google.com/workspace/guides/configure-oauth-consent")!)
+                    Text("If Google says 'Ineligible accounts not added' for a personal @gmail.com address, check Google Auth platform -> Audience. Internal projects only allow users in that Workspace or Cloud Identity organization; use External for personal Gmail testing.")
+                    Text("If Google still refuses to add the address as a test user, try a normal consumer Gmail account first. Some account types can also be restricted by organization policy or Advanced Protection.")
+                    Text("Microsoft: Microsoft Entra admin center -> App registrations -> New registration. Paste the Application (client) ID here. For desktop sign-in, add the Mobile and desktop applications platform with `http://localhost`.")
+                    Link("Open Microsoft app registration instructions", destination: URL(string: "https://learn.microsoft.com/en-us/entra/identity-platform/scenario-desktop-app-configuration")!)
+                    Text("ClawMail requests the Gmail IMAP/SMTP scope `https://mail.google.com/`, which Google treats as a restricted scope for broader distribution.")
+                    Text("In Google Cloud Console, Google Auth platform > Data Access should include the Gmail, Calendar, and Google Contacts CardDAV scope ClawMail requests. Google CardDAV still expects the legacy Contacts scope `https://www.google.com/m8/feeds`, so granting only `https://www.googleapis.com/auth/contacts` can still leave IMAP/SMTP/CalDAV working while CardDAV returns HTTP 403.")
+                    Text("If you change Google Data Access after a failed sign-in, go back and run browser sign-in again. Retrying the connection test alone reuses the same token and will not pick up new scopes.")
+                    Text("Google's installed-app docs describe the client secret as optional, but if ClawMail reports `client_secret is missing`, paste the Google Client Secret from the same OAuth client here or recreate that client as a Desktop app.")
+                    Text("If Gmail mail works but Google Calendar still fails with HTTP 403, enable `CalDAV API` (`caldav.googleapis.com`) in that same Cloud project, then sign in again.")
+                    Link("Open CalDAV API in Google Cloud Console", destination: URL(string: "https://console.cloud.google.com/apis/library/caldav.googleapis.com")!)
+                    Text("If Gmail mail works but Google Contacts still fails with HTTP 403, rerun Google browser sign-in on the latest build so ClawMail can request the legacy Google Contacts CardDAV scope `https://www.google.com/m8/feeds`. If that scope is already granted and CardDAV still fails, stop there and capture the exact error text for debugging.")
+                    Text("For Microsoft and some other providers, the client secret may still be optional depending on how the app registration is configured.")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
                 LabeledContent("Google Client ID") {
                     TextField("Google Client ID", text: $googleClientId)
@@ -164,7 +182,7 @@ struct APITab: View {
                 }
 
                 LabeledContent("Google Client Secret") {
-                    SecureField("Optional", text: $googleClientSecret)
+                    SecureField("Paste if Google provided one", text: $googleClientSecret)
                         .textFieldStyle(.roundedBorder)
                         .frame(minWidth: 280)
                         .onChange(of: googleClientSecret) { _, newValue in

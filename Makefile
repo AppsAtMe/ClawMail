@@ -1,4 +1,4 @@
-.PHONY: build release test bundle sign notarize dmg install uninstall clean test-infra-up test-infra-down
+.PHONY: build release test artwork bundle sign notarize dmg install uninstall clean test-infra-up test-infra-down
 
 # ──────────────────────────────────────────────
 # Configuration (override on command line)
@@ -7,6 +7,8 @@ VERSION        ?= 1.0.0
 SIGNING_ID     ?= -
 TEAM_ID        ?=
 ENTITLEMENTS   := Sources/ClawMailApp/Resources/ClawMail.entitlements
+ARTWORK_SCRIPT := scripts/generate_brand_assets.py
+BRANDING_DIR   := Sources/ClawMailApp/Resources/Branding
 APP_BUNDLE     := build/ClawMail.app
 APP_INSTALL_DIR ?= /Applications
 BIN_DIR        ?= /usr/local/bin
@@ -28,6 +30,9 @@ release:
 test:
 	swift test
 
+artwork:
+	python3 $(ARTWORK_SCRIPT)
+
 # ──────────────────────────────────────────────
 # App Bundle
 # ──────────────────────────────────────────────
@@ -43,6 +48,8 @@ bundle: release
 	@# Copy metadata
 	@cp Sources/ClawMailApp/Resources/Info.plist $(APP_BUNDLE)/Contents/Info.plist
 	@cp Sources/ClawMailApp/Resources/ClawMail.entitlements $(APP_BUNDLE)/Contents/Resources/
+	@cp Sources/ClawMailApp/Resources/AppIcon.icns $(APP_BUNDLE)/Contents/Resources/
+	@cp -R $(BRANDING_DIR) $(APP_BUNDLE)/Contents/Resources/
 	@cp Resources/com.clawmail.agent.plist $(APP_BUNDLE)/Contents/Resources/
 	@echo "Bundle created at $(APP_BUNDLE)"
 

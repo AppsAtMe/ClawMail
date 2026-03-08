@@ -117,6 +117,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case api = "API"
     case activityLog = "Activity Log"
     case general = "General"
+    case about = "About"
 
     var id: String { rawValue }
 
@@ -127,6 +128,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .api: return "network"
         case .activityLog: return "list.bullet.rectangle"
         case .general: return "gearshape"
+        case .about: return "info.circle"
         }
     }
 }

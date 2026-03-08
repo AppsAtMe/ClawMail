@@ -41,6 +41,11 @@ struct StatusMenu: View {
             Divider()
 
             VStack(spacing: 8) {
+                Button(action: openAbout) {
+                    actionRow("About ClawMail", systemImage: "info.circle")
+                }
+                .buttonStyle(.plain)
+
                 Button(action: openSettings) {
                     actionRow("Settings", systemImage: "gearshape")
                 }
@@ -71,6 +76,11 @@ struct StatusMenu: View {
     private func openSettings() {
         openSettingsAction()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func openAbout() {
+        appState.settingsTab = .about
+        openSettings()
     }
 
     private func openActivityLog() {

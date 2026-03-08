@@ -37,6 +37,12 @@ struct SettingsWindow: View {
                     Label("General", systemImage: "gearshape")
                 }
                 .tag(SettingsTab.general)
+
+            AboutTab()
+                .tabItem {
+                    Label("About", systemImage: "info.circle")
+                }
+                .tag(SettingsTab.about)
         }
         .frame(minWidth: 650, minHeight: 450)
         .environment(appState)

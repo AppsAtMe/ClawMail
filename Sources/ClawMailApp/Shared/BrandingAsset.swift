@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 enum BrandingAsset: String, CaseIterable {
@@ -7,5 +8,10 @@ enum BrandingAsset: String, CaseIterable {
 
     var url: URL? {
         Bundle.main.url(forResource: rawValue, withExtension: "png", subdirectory: "Branding")
+    }
+
+    var image: NSImage? {
+        guard let url else { return nil }
+        return NSImage(contentsOf: url)
     }
 }

@@ -44,7 +44,7 @@ public enum OAuthHelpers {
                     "email",
                     "https://mail.google.com/",
                     "https://www.googleapis.com/auth/calendar",
-                    "https://www.google.com/m8/feeds",
+                    "https://www.googleapis.com/auth/carddav",
                 ],
                 redirectURI: redirectURI
             )

@@ -172,7 +172,7 @@ struct OAuthRefreshTests {
                 scopes: [
                     "https://mail.google.com/",
                     "https://www.googleapis.com/auth/calendar",
-                    "https://www.google.com/m8/feeds",
+                    "https://www.googleapis.com/auth/carddav",
                 ],
                 redirectURI: redirectURI
             ),
@@ -187,7 +187,7 @@ struct OAuthRefreshTests {
                 url: request.url!,
                 status: 200,
                 body: """
-                {"access_token":"fresh-token","refresh_token":"refresh-token","expires_in":3600,"scope":"https://mail.google.com/ https://www.googleapis.com/auth/calendar"}
+                {"access_token":"fresh-token","refresh_token":"refresh-token","expires_in":3600,"scope":"https://mail.google.com/ https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/carddav"}
                 """
             )
         }
@@ -201,9 +201,10 @@ struct OAuthRefreshTests {
         #expect(tokens.grantedScopes == [
             "https://mail.google.com/",
             "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/carddav",
         ])
         #expect(tokens.grantsScope("https://www.googleapis.com/auth/calendar") == true)
-        #expect(tokens.grantsScope("https://www.google.com/m8/feeds") == false)
+        #expect(tokens.grantsScope("https://www.googleapis.com/auth/carddav") == true)
     }
 
     @Test func authorizationCodeExchangeCapturesAuthorizedGoogleEmailFromIDToken() async throws {
@@ -222,7 +223,7 @@ struct OAuthRefreshTests {
                     "openid",
                     "email",
                     "https://mail.google.com/",
-                    "https://www.google.com/m8/feeds",
+                    "https://www.googleapis.com/auth/carddav",
                 ],
                 redirectURI: redirectURI
             ),

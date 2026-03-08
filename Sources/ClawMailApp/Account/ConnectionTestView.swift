@@ -41,8 +41,8 @@ struct ConnectionTestView: View {
 
     private let timeoutSeconds = 15
     private let googleCalendarScope = "https://www.googleapis.com/auth/calendar"
-    private let googleCardDAVScope = "https://www.google.com/m8/feeds"
-    private let googleModernContactsScope = "https://www.googleapis.com/auth/contacts"
+    private let googleCardDAVScope = "https://www.googleapis.com/auth/carddav"
+    private let googleContactsScope = "https://www.googleapis.com/auth/contacts"
 
     var body: some View {
         VStack(spacing: 16) {
@@ -310,7 +310,7 @@ struct ConnectionTestView: View {
                     }
                     if normalized.contains("did not grant contacts access") {
                         return RecoverySuggestion(
-                            text: "Try this: retry Google browser sign-in and make sure Contacts access is granted on the consent screen. In Google Cloud Console, Google Auth platform > Data Access should also list Google's legacy CardDAV contacts scope `\(googleCardDAVScope)` for this app.",
+                            text: "Try this: retry Google browser sign-in and make sure Google CardDAV access is granted on the consent screen. In Google Cloud Console, Google Auth platform > Data Access should also list the CardDAV scope `\(googleCardDAVScope)` for this app. Google granting the broader Contacts scope `\(googleContactsScope)` alone is not enough for CardDAV.",
                             linkTitle: "Open Google OAuth consent screen instructions",
                             linkURL: URL(string: "https://developers.google.com/workspace/guides/configure-oauth-consent")
                         )
@@ -324,7 +324,7 @@ struct ConnectionTestView: View {
                     }
                     if service == "CardDAV" {
                         return RecoverySuggestion(
-                            text: "Try this: Gmail mail OAuth is working, but Google Contacts DAV is still returning 403. Google CardDAV expects the legacy Google Contacts scope `\(googleCardDAVScope)`. Re-run Google browser sign-in on the latest build so ClawMail can request that scope, then confirm Google Auth platform > Data Access includes it for this app.",
+                            text: "Try this: Gmail mail OAuth is working, but Google Contacts DAV is still returning 403. Google's live CardDAV response says the token needs `\(googleCardDAVScope)`. Re-run Google browser sign-in on the latest build so ClawMail can request that scope, then confirm Google Auth platform > Data Access includes it for this app.",
                             linkTitle: "Open Google OAuth consent screen instructions",
                             linkURL: URL(string: "https://developers.google.com/workspace/guides/configure-oauth-consent")
                         )
@@ -391,11 +391,13 @@ struct ConnectionTestView: View {
         let diagnostic: String
         if let grantedScopes = authMaterial.grantedGoogleScopes(), !grantedScopes.isEmpty {
             let formattedScopes = grantedScopes.sorted().joined(separator: ", ")
-            if authMaterial.grantsGoogleScope(requiredScope) == true {
+            let hasCardDAVGrant = grantedScopes.contains(googleCardDAVScope)
+            let hasContactsGrant = grantedScopes.contains(googleContactsScope)
+
+            if requiredScope == googleCardDAVScope, hasContactsGrant, !hasCardDAVGrant {
+                diagnostic = "ClawMail saw Google grant the broader Contacts scope `\(googleContactsScope)`, but Google's live CardDAV challenge still asked for the narrower CardDAV scope `\(googleCardDAVScope)`. Granted scopes: \(formattedScopes)."
+            } else if authMaterial.grantsGoogleScope(requiredScope) == true {
                 diagnostic = "ClawMail saw Google grant `\(requiredScope)`. If Google still says the token has insufficient scopes, stop here and send this result back because ClawMail may need a Google-specific scope adjustment for \(serviceLabel.lowercased()) access. Granted scopes: \(formattedScopes)."
-            } else if requiredScope == googleCardDAVScope,
-                      authMaterial.grantsGoogleScope(googleModernContactsScope) == true {
-                diagnostic = "ClawMail saw Google grant the newer Contacts scope `\(googleModernContactsScope)`, but Google CardDAV still rejected the token. That strongly suggests this Google CardDAV flow needs the legacy Contacts scope `\(googleCardDAVScope)` instead. Granted scopes: \(formattedScopes)."
             } else {
                 diagnostic = "ClawMail did not receive the required Google scope `\(requiredScope)`. Granted scopes were: \(formattedScopes)."
             }
@@ -427,8 +429,8 @@ struct ConnectionTestView: View {
 
         guard let missingScope else { return nil }
         let message: String
-        if service == "CardDAV", authMaterial.grantsGoogleScope(googleModernContactsScope) == true {
-            message = "Authentication failed: Google browser sign-in granted the newer Contacts scope, but not the legacy Google CardDAV contacts scope."
+        if service == "CardDAV", authMaterial.grantsGoogleScope(googleContactsScope) == true {
+            message = "Authentication failed: Google browser sign-in granted Google Contacts access, but not the Google CardDAV scope the server requested."
         } else {
             message = "Authentication failed: Google browser sign-in did not grant \(missingScopeLabel) access."
         }
@@ -437,7 +439,7 @@ struct ConnectionTestView: View {
             passed: false,
             message: message,
             recoverySuggestion: RecoverySuggestion(
-                text: "Try this: retry Google browser sign-in and make sure \(missingScopeLabel) access is granted. In Google Cloud Console, Google Auth platform > Data Access should also include `\(missingScope)` for this app.",
+                text: "Try this: retry Google browser sign-in and make sure \(missingScopeLabel) access is granted. In Google Cloud Console, Google Auth platform > Data Access should also include `\(missingScope)` for this app. For Google CardDAV, the broader Contacts scope `\(googleContactsScope)` is not enough by itself.",
                 linkTitle: "Open Google OAuth consent screen instructions",
                 linkURL: URL(string: "https://developers.google.com/workspace/guides/configure-oauth-consent")
             )

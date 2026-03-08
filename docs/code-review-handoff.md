@@ -10,6 +10,93 @@ Purpose: Carry forward a full review into a fresh session with enough context to
 - Best restart point: begin from the newest commit that contains this handoff note, then continue from the unresolved Google CardDAV finding described in the current latest update below
 - Current user-testing status: Apple / iCloud is verified by hand; Google OAuth mail + calendar are working; Google CardDAV is still blocked; Fastmail and Microsoft manual verification remain to do
 
+## Session Update (March 8, 2026, newest latest)
+
+This handoff now reflects the next live Google CardDAV discovery result after ClawMail started requesting the server-advertised `https://www.googleapis.com/auth/carddav` scope.
+
+Completed in this session:
+- Captured a live Google OAuth token response showing that browser sign-in now grants `https://www.googleapis.com/auth/carddav` alongside mail/calendar/openid scopes.
+- Captured the next live CardDAV discovery behavior after that scope fix:
+  - `PROPFIND https://www.googleapis.com/.well-known/carddav`
+  - HTTP `301` redirect to `https://www.googleapis.com/carddav/v1/principals/<authorized-email>/lists/default/`
+  - immediate HTTP `400` when ClawMail asked that redirected resource for `current-user-principal`
+- Added a Google-specific CardDAV fallback so if `.well-known/carddav` resolves directly to an address-book collection and Google's server rejects the principal-style `PROPFIND`, ClawMail retries against that same resource with `displayname` + `resourcetype`, confirms it is an address book, and uses it as the address-book home.
+- Added regression coverage for that exact Google `301 -> 400 -> fallback succeeds` path.
+
+Current interpretation after this pass:
+- The Google scope problem appears resolved: Google's token endpoint granted `https://www.googleapis.com/auth/carddav`.
+- The remaining Google blocker was a discovery-shape mismatch, not missing OAuth permission.
+- Google appears willing to redirect `.well-known/carddav` straight to the default address-book collection for the signed-in account, and that resource does not accept a `current-user-principal` lookup.
+
+Most useful next step for a fresh session:
+1. Fully quit and relaunch the installed app.
+2. Re-run Google browser sign-in once more.
+3. Retry CardDAV and capture the new `ClawMail CardDAV:` lines.
+4. Confirm the log now shows `Google address book fallback accepted resource ...` and that address-book listing proceeds instead of stopping at HTTP `400`.
+
+Current build/test/install status after these fixes:
+- `swift test`: passed
+- Test suite reported 222 passing tests across 32 suites
+- `make install`: passed
+- Updated app bundle installed to `/Applications/ClawMail.app`
+
+## Session Update (March 8, 2026, newer latest)
+
+This handoff now reflects the next Google CardDAV debugging step after capturing both the OAuth token scopes and the live CardDAV `WWW-Authenticate` challenge from Google's server.
+
+Completed in this session:
+- Captured a live Google OAuth token response showing that browser sign-in granted `https://www.googleapis.com/auth/contacts`, `https://www.googleapis.com/auth/calendar`, and `https://mail.google.com/`.
+- Captured the first live CardDAV `PROPFIND` failure to `https://www.googleapis.com/.well-known/carddav`, which returned HTTP `403` before any redirect occurred.
+- Captured the decisive Google `WWW-Authenticate` challenge header from that 403 response:
+  `error="insufficient_scope", scope="https://www.googleapis.com/auth/carddav"`
+- Updated ClawMail's Google OAuth scope request from the old legacy Contacts/CardDAV assumption to the live server-advertised CardDAV scope `https://www.googleapis.com/auth/carddav`.
+- Removed the app-side assumption that the broader Google Contacts scope `https://www.googleapis.com/auth/contacts` is sufficient for CardDAV.
+- Updated the Google setup copy, diagnostics, README, and verification checklist to point at `https://www.googleapis.com/auth/carddav`.
+- Updated CardDAV auth failures to include the required scope from the `WWW-Authenticate` header in the user-visible error when Google provides one.
+
+Current interpretation after this pass:
+- Google's live CardDAV endpoint is the strongest source we have now, and it explicitly says the token needs `https://www.googleapis.com/auth/carddav`.
+- The earlier `m8/feeds` / canonical-contacts-scope theory is no longer the best explanation for the current blocker.
+- The next test should be done only after re-running Google browser sign-in on a build that requests `https://www.googleapis.com/auth/carddav`.
+
+Most useful next step for a fresh session:
+1. Re-run Google browser sign-in on the latest installed build.
+2. Confirm the OAuth scope log now includes `https://www.googleapis.com/auth/carddav`.
+3. Retry CardDAV.
+4. If CardDAV still fails, capture the updated `ClawMail CardDAV:` lines and compare Google's granted scopes against the CardDAV challenge header again.
+
+Current build/test/install status after these fixes:
+- Focused DAV and OAuth-related tests passed locally
+- `make install`: passed
+- Updated app bundle installed to `/Applications/ClawMail.app`
+
+## Session Update (March 8, 2026, current latest)
+
+This handoff now reflects the first follow-up pass on the Google CardDAV blocker after re-checking the current Google docs and tightening ClawMail's own scope handling.
+
+Completed in this session:
+- Re-checked the Google docs from primary sources and found the key clue in the Contacts API migration guide: Google documents the legacy Contacts scope `https://www.google.com/m8/feeds` as an alias of the canonical People API scope `https://www.googleapis.com/auth/contacts`.
+- Updated `ConnectionTestAuthMaterial` so Google Contacts scope checks now treat those two scope strings as equivalent instead of treating the canonical scope as a hard failure.
+- Removed the Google CardDAV preflight false negative that could block the CardDAV connection test before ClawMail even tried the DAV request, simply because Google returned the canonical scope label.
+- Added OAuth debug logging for interactive browser sign-in in `OAuthFlowView` so `/tmp/clawmail.stderr.log` now records the requested Google scopes, a redacted authorization URL, the token-response granted scope list, and the authorized Google email when present.
+- Updated the in-app Google recovery copy, Settings > API guidance, README, and verification checklist to say that Google may report the legacy CardDAV scope back as `https://www.googleapis.com/auth/contacts`.
+- Added regression coverage so app-side Google scope checks now explicitly accept the canonical Contacts scope as satisfying the legacy CardDAV scope check.
+
+Current interpretation after this pass:
+- The March 7 failure that said Google granted `https://www.googleapis.com/auth/contacts` but not `https://www.google.com/m8/feeds` now looks more like a ClawMail diagnostic bug than proof that Google denied the needed Contacts permission.
+- The earlier March 7 6:25 PM Google CardDAV `insufficient authentication scopes` error is still worth retesting on this new build, because that earlier run happened before the alias-aware logic and before the new OAuth scope logging.
+
+Most useful next step for a fresh session:
+1. Re-run Google browser sign-in on the latest build.
+2. Re-test Google CardDAV without changing anything else first.
+3. If CardDAV still fails, capture the exact CardDAV error plus the new OAuth log lines from `/tmp/clawmail.stderr.log` showing the requested scopes and granted scopes.
+4. Only after that, decide whether the remaining problem is still Google-platform behavior or something in ClawMail's DAV request path.
+
+Current build/test status after these fixes:
+- `swift test`: passed
+- Test suite reported 221 passing tests across 32 suites
+- Manual Google verification on this exact build has not been rerun yet
+
 ## Session Update (March 7, 2026, current latest)
 
 This handoff now reflects the provider-verification push after Apple was verified, including the Google OAuth crash fixes, account-binding improvements, and the still-open Google CardDAV scope issue.

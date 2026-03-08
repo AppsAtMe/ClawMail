@@ -36,6 +36,9 @@ private enum AppLogBootstrap {
     static func configureIfNeeded() {
         redirect(fileDescriptor: STDOUT_FILENO, to: stdoutPath)
         redirect(fileDescriptor: STDERR_FILENO, to: stderrPath)
+        setvbuf(stdout, nil, _IOLBF, 0)
+        setvbuf(stderr, nil, _IONBF, 0)
+        logStartup()
     }
 
     private static func redirect(fileDescriptor: Int32, to path: String) {
@@ -49,6 +52,12 @@ private enum AppLogBootstrap {
             _ = dup2(descriptor, fileDescriptor)
             close(descriptor)
         }
+    }
+
+    private static func logStartup() {
+        let formatter = ISO8601DateFormatter()
+        let timestamp = formatter.string(from: Date())
+        fputs("ClawMail: log bootstrap active at \(timestamp) (stdout=\(stdoutPath), stderr=\(stderrPath))\n", stderr)
     }
 }
 

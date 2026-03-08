@@ -13,6 +13,7 @@ import ClawMailCore
 /// 7. Save tokens to Keychain
 struct OAuthFlowView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openSettings) private var openSettingsAction
 
     let provider: OAuthProvider
     let loginHint: String?

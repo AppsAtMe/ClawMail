@@ -21,6 +21,7 @@ struct APITab: View {
     @State private var microsoftClientSecret: String = ""
     @State private var googleSecretSaved = false
     @State private var microsoftSecretSaved = false
+    @State private var presentedGuide: OAuthSetupGuideProvider?
     @State private var errorState: UIErrorState?
 
     init(
@@ -151,31 +152,23 @@ struct APITab: View {
                 }
             }
 
-            Section("OAuth Client IDs") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("These values come from OAuth app registrations you create with Google or Microsoft. ClawMail does not generate them for you.")
-                    Text("Google: Google Cloud Console -> Google Auth platform -> Clients -> Create Client -> Desktop app. Paste the resulting Client ID here.")
-                    Link("Open Google OAuth client instructions", destination: URL(string: "https://developers.google.com/workspace/guides/create-credentials")!)
-                    Text("If your Google OAuth consent screen is in Testing, add your Google account as a test user or Google will return Error 403: access_denied.")
-                    Link("Open Google OAuth consent screen instructions", destination: URL(string: "https://developers.google.com/workspace/guides/configure-oauth-consent")!)
-                    Text("If Google says 'Ineligible accounts not added' for a personal @gmail.com address, check Google Auth platform -> Audience. Internal projects only allow users in that Workspace or Cloud Identity organization; use External for personal Gmail testing.")
-                    Text("If Google still refuses to add the address as a test user, try a normal consumer Gmail account first. Some account types can also be restricted by organization policy or Advanced Protection.")
-                    Text("Microsoft: Microsoft Entra admin center -> App registrations -> New registration. Paste the Application (client) ID here. For desktop sign-in, add the Mobile and desktop applications platform with `http://localhost`.")
-                    Link("Open Microsoft app registration instructions", destination: URL(string: "https://learn.microsoft.com/en-us/entra/identity-platform/scenario-desktop-app-configuration")!)
-                    Text("ClawMail requests the Gmail IMAP/SMTP scope `https://mail.google.com/`, which Google treats as a restricted scope for broader distribution.")
-                    Text("In Google Cloud Console, Google Auth platform > Data Access should include the Gmail, Calendar, and Google CardDAV scope `https://www.googleapis.com/auth/carddav` ClawMail requests. Google's live CardDAV endpoint advertised that exact scope in its `WWW-Authenticate` challenge.")
-                    Text("If you change Google Data Access after a failed sign-in, go back and run browser sign-in again. Retrying the connection test alone reuses the same token and will not pick up new scopes.")
-                    Text("Google's installed-app docs describe the client secret as optional, but if ClawMail reports `client_secret is missing`, paste the Google Client Secret from the same OAuth client here or recreate that client as a Desktop app.")
-                    Text("If Gmail mail works but Google Calendar still fails with HTTP 403, enable `CalDAV API` (`caldav.googleapis.com`) in that same Cloud project, then sign in again.")
-                    Link("Open CalDAV API in Google Cloud Console", destination: URL(string: "https://console.cloud.google.com/apis/library/caldav.googleapis.com")!)
-                    Text("If Gmail mail works but Google Contacts still fails with HTTP 403, rerun Google browser sign-in on the latest build so ClawMail can request `https://www.googleapis.com/auth/carddav`. If Google still grants only `https://www.googleapis.com/auth/contacts` and CardDAV fails after that, stop there and capture the exact error text plus the OAuth/CardDAV log lines for debugging.")
-                    Text("For Microsoft and some other providers, the client secret may still be optional depending on how the app registration is configured.")
+            Section("Google OAuth") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Browser sign-in for Gmail, Calendar, and Contacts.")
+                        .font(.headline)
+                    Text("Use a Google Desktop app OAuth client here. ClawMail requests Gmail, Calendar, and Google CardDAV access, so rerun browser sign-in after changing Google scopes.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 16) {
+                        Button("Open Setup Guide") {
+                            presentedGuide = .google
+                        }
+                        Link("Open Google Docs", destination: URL(string: "https://developers.google.com/workspace/guides/create-credentials")!)
+                    }
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
 
-                LabeledContent("Google Client ID") {
-                    TextField("Google Client ID", text: $googleClientId)
+                LabeledContent("Client ID") {
+                    TextField("Google Desktop app Client ID", text: $googleClientId)
                         .textFieldStyle(.roundedBorder)
                         .frame(minWidth: 280)
                         .onChange(of: googleClientId) { _, newValue in
@@ -188,9 +181,9 @@ struct APITab: View {
                         }
                 }
 
-                LabeledContent("Google Client Secret") {
+                LabeledContent("Client Secret") {
                     VStack(alignment: .leading, spacing: 8) {
-                        SecureField("Enter new secret to replace the stored one", text: $googleClientSecret)
+                        SecureField("Paste only if Google provided one", text: $googleClientSecret)
                             .textFieldStyle(.roundedBorder)
                             .frame(minWidth: 280)
                         HStack(spacing: 12) {
@@ -209,14 +202,30 @@ struct APITab: View {
                                     .font(.caption)
                             }
                         }
-                        Text("Stored secrets are not auto-loaded when this screen opens, which avoids extra Keychain prompts.")
+                        Text("Google's desktop docs say the secret can be optional, but if ClawMail reports `client_secret is missing`, store it here and sign in again.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
+            }
 
-                LabeledContent("Microsoft Client ID") {
-                    TextField("Microsoft Client ID", text: $microsoftClientId)
+            Section("Microsoft OAuth") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Browser sign-in for Microsoft 365 / Outlook mail.")
+                        .font(.headline)
+                    Text("Use an App Registration from Microsoft Entra. Desktop sign-in needs the Mobile and desktop applications platform with `http://localhost`.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 16) {
+                        Button("Open Setup Guide") {
+                            presentedGuide = .microsoft
+                        }
+                        Link("Open Microsoft Docs", destination: URL(string: "https://learn.microsoft.com/en-us/entra/identity-platform/scenario-desktop-app-configuration")!)
+                    }
+                }
+
+                LabeledContent("Application ID") {
+                    TextField("Microsoft Application (client) ID", text: $microsoftClientId)
                         .textFieldStyle(.roundedBorder)
                         .frame(minWidth: 280)
                         .onChange(of: microsoftClientId) { _, newValue in
@@ -229,9 +238,9 @@ struct APITab: View {
                         }
                 }
 
-                LabeledContent("Microsoft Client Secret") {
+                LabeledContent("Client Secret") {
                     VStack(alignment: .leading, spacing: 8) {
-                        SecureField("Enter new secret to replace the stored one", text: $microsoftClientSecret)
+                        SecureField("Optional depending on your registration", text: $microsoftClientSecret)
                             .textFieldStyle(.roundedBorder)
                             .frame(minWidth: 280)
                         HStack(spacing: 12) {
@@ -250,7 +259,7 @@ struct APITab: View {
                                     .font(.caption)
                             }
                         }
-                        Text("Stored secrets are not auto-loaded when this screen opens, which avoids extra Keychain prompts.")
+                        Text("Many desktop registrations can work without a secret, so only save one if your Microsoft setup actually issued it.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -275,6 +284,9 @@ struct APITab: View {
         }
         .formStyle(.grouped)
         .padding()
+        .sheet(item: $presentedGuide) { provider in
+            OAuthSetupGuideSheet(provider: provider)
+        }
         .onAppear { loadState() }
         .onReceive(inspection.notice) { inspection.visit(self, $0) }
         .alert("Operation Failed", isPresented: showingErrorAlert) {
@@ -439,6 +451,157 @@ struct APITab: View {
         } catch {
             errorState = UIErrorState(action: action, error: error)
             return false
+        }
+    }
+}
+
+private enum OAuthSetupGuideProvider: String, Identifiable {
+    case google
+    case microsoft
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .google:
+            return "Google OAuth Setup"
+        case .microsoft:
+            return "Microsoft OAuth Setup"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .google:
+            return "Use this guide to create the Google Desktop app client ClawMail expects."
+        case .microsoft:
+            return "Use this guide to create the Microsoft Entra app registration for desktop sign-in."
+        }
+    }
+}
+
+private struct OAuthSetupGuideSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let provider: OAuthSetupGuideProvider
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text(provider.subtitle)
+                        .foregroundStyle(.secondary)
+
+                    switch provider {
+                    case .google:
+                        guideStep(
+                            1,
+                            title: "Create a Desktop app client",
+                            body: "Open Google Cloud Console, go to Google Auth platform, then create a Desktop app OAuth client. Paste the resulting Client ID into ClawMail.",
+                            links: [
+                                ("Google OAuth client instructions", "https://developers.google.com/workspace/guides/create-credentials"),
+                            ]
+                        )
+                        guideStep(
+                            2,
+                            title: "Set the project audience correctly",
+                            body: "If you are testing with a personal Gmail account, make sure the Google Auth platform audience is External. Internal projects only work for users inside that Google Workspace or Cloud Identity organization.",
+                            links: [
+                                ("OAuth consent screen instructions", "https://developers.google.com/workspace/guides/configure-oauth-consent"),
+                            ]
+                        )
+                        guideStep(
+                            3,
+                            title: "Add yourself as a test user if needed",
+                            body: "If the consent screen is still in Testing, add the exact Google account you plan to use in ClawMail. Otherwise Google can return Error 403: access_denied.",
+                            links: []
+                        )
+                        guideStep(
+                            4,
+                            title: "Configure Google Data Access scopes",
+                            body: "Include the Gmail IMAP/SMTP scope, Calendar scope, and Google CardDAV scope `https://www.googleapis.com/auth/carddav`. If you change Data Access later, you must rerun browser sign-in in ClawMail to get a fresh token.",
+                            links: []
+                        )
+                        guideStep(
+                            5,
+                            title: "Add the client secret only if Google issued one or ClawMail asks for it",
+                            body: "Google's desktop docs describe the client secret as optional, but if ClawMail reports `client_secret is missing`, paste the secret from that same client into the Google OAuth section in Settings.",
+                            links: []
+                        )
+                        guideStep(
+                            6,
+                            title: "If Google Calendar still 403s, enable CalDAV API",
+                            body: "Mail and contacts can work while CalDAV is still blocked. If calendar testing returns HTTP 403, enable `caldav.googleapis.com` in the same Google project and rerun browser sign-in.",
+                            links: [
+                                ("Open CalDAV API in Google Cloud Console", "https://console.cloud.google.com/apis/library/caldav.googleapis.com"),
+                            ]
+                        )
+
+                    case .microsoft:
+                        guideStep(
+                            1,
+                            title: "Create an app registration",
+                            body: "Open Microsoft Entra admin center, create a new App Registration, and copy the Application (client) ID into ClawMail.",
+                            links: [
+                                ("Microsoft desktop app registration instructions", "https://learn.microsoft.com/en-us/entra/identity-platform/scenario-desktop-app-configuration"),
+                            ]
+                        )
+                        guideStep(
+                            2,
+                            title: "Enable the desktop redirect platform",
+                            body: "In Authentication, add the Mobile and desktop applications platform and include `http://localhost`. That is what ClawMail uses for the browser callback.",
+                            links: []
+                        )
+                        guideStep(
+                            3,
+                            title: "Only save a client secret if your registration issued one",
+                            body: "Some desktop registrations work without a secret. If your Microsoft setup provides one or ClawMail asks for it, store it in the Microsoft OAuth section in Settings.",
+                            links: []
+                        )
+                        guideStep(
+                            4,
+                            title: "Return to ClawMail and rerun browser sign-in",
+                            body: "After you save the Application ID and any needed secret, go back to account setup and run browser sign-in again so ClawMail uses the updated registration.",
+                            links: []
+                        )
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .navigationTitle(provider.title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .frame(minWidth: 560, minHeight: 520)
+    }
+
+    private func guideStep(
+        _ number: Int,
+        title: String,
+        body: String,
+        links: [(String, String)]
+    ) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Text("\(number)")
+                .font(.headline)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(Color.accentColor.opacity(0.15)))
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                    .font(.headline)
+                Text(body)
+                    .foregroundStyle(.secondary)
+                ForEach(Array(links.enumerated()), id: \.offset) { _, link in
+                    if let url = URL(string: link.1) {
+                        Link(link.0, destination: url)
+                    }
+                }
+            }
         }
     }
 }

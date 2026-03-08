@@ -234,9 +234,9 @@ struct OAuthFlowView: View {
     private func missingClientIDMessage(for provider: OAuthProvider) -> String {
         switch provider {
         case .google:
-            return "Google OAuth client ID not configured. Create a Desktop app OAuth client in Google Cloud Console, then paste its Client ID into Settings → API → OAuth Client IDs."
+            return "Google OAuth client ID not configured. Create a Desktop app OAuth client in Google Cloud Console, then paste its Client ID into Settings → API → Google OAuth."
         case .microsoft:
-            return "Microsoft OAuth client ID not configured. Create an app registration in Microsoft Entra, then paste its Application (client) ID into Settings → API → OAuth Client IDs."
+            return "Microsoft OAuth client ID not configured. Create an app registration in Microsoft Entra, then paste its Application (client) ID into Settings → API → Microsoft OAuth."
         }
     }
 
@@ -269,7 +269,7 @@ struct OAuthFlowView: View {
         let normalized = baseMessage.lowercased()
         if provider == .google {
             if normalized.contains("client_secret is missing") {
-                return "Google completed browser sign-in, but the token exchange rejected this OAuth client because no client secret was configured. Paste the Google Client Secret from the same OAuth client into Settings -> API -> OAuth Client IDs, then try again. If you already have one entered, recreate the Google OAuth client as a Desktop app and use the new Client ID + Client Secret pair."
+                return "Google completed browser sign-in, but the token exchange rejected this OAuth client because no client secret was configured. Paste the Google Client Secret from the same OAuth client into Settings -> API -> Google OAuth, then try again. If you already have one entered, recreate the Google OAuth client as a Desktop app and use the new Client ID + Client Secret pair."
             }
             if normalized.contains("access_denied") {
                 return "Google denied the OAuth request. Make sure this is a Google Desktop app client, the project Audience is External if you are testing with a personal Gmail account, your Google account is added as a test user while the consent screen is in Testing, Google Auth platform > Data Access includes the Gmail, Calendar, and Google CardDAV scope `https://www.googleapis.com/auth/carddav` ClawMail requests, and be aware that the Gmail IMAP/SMTP scope used by ClawMail is a restricted Google scope."

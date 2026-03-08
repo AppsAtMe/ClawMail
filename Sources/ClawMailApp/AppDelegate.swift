@@ -190,9 +190,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func requestNotificationAuthorization() async {
         let center = UNUserNotificationCenter.current()
-        let settings = await center.notificationSettings()
+        let authorizationStatus = await notificationAuthorizationStatus(from: center)
 
-        switch settings.authorizationStatus {
+        switch authorizationStatus {
         case .authorized, .provisional, .ephemeral:
             return
         case .denied:
@@ -212,6 +212,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             log("Failed to request notification authorization: \(describe(error))")
+        }
+    }
+
+    private static func notificationAuthorizationStatus(
+        from center: UNUserNotificationCenter
+    ) async -> UNAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            center.getNotificationSettings { settings in
+                continuation.resume(returning: settings.authorizationStatus)
+            }
         }
     }
 

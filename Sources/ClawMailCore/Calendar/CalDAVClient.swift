@@ -104,8 +104,12 @@ public actor CalDAVClient {
     }
 
     /// Test authentication by performing a basic PROPFIND on the base URL.
+    /// Handles .well-known redirects by following them to the actual DAV endpoint.
     public func authenticate() async throws {
-        var request = URLRequest(url: serverURL)
+        // First, handle .well-known URLs that require redirect following
+        let urlToProbe = try await resolveWellKnownIfNeeded(serverURL)
+        
+        var request = URLRequest(url: urlToProbe)
         request.httpMethod = "PROPFIND"
         request.setValue("0", forHTTPHeaderField: "Depth")
         request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
@@ -134,6 +138,29 @@ public actor CalDAVClient {
             // Discover calendar-home-set from the principal
             try await discoverCalendarHome(principalPath: principal)
         }
+    }
+    
+    /// If the URL is a .well-known path, probe it and follow redirects to find the actual endpoint.
+    private func resolveWellKnownIfNeeded(_ url: URL) async throws -> URL {
+        // Only special-case .well-known URLs
+        guard url.path.lowercased().contains("/.well-known/") else {
+            return url
+        }
+        
+        // Do an authenticated PROPFIND on the .well-known URL
+        var request = URLRequest(url: url)
+        request.httpMethod = "PROPFIND"
+        request.setValue("0", forHTTPHeaderField: "Depth")
+        try await applyAuth(to: &request)
+        
+        let (_, response) = try await session.data(for: request)
+        
+        // If we got a redirect, use the final URL
+        if let effectiveURL = response.url, effectiveURL.absoluteString != url.absoluteString {
+            return effectiveURL
+        }
+        
+        return url
     }
 
     // MARK: - Calendar Operations

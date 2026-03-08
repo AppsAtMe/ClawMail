@@ -75,6 +75,7 @@ struct StatusMenu: View {
     }
 
     private func openSettings() {
+        appState.settingsTab = .accounts
         openSettingsAction()
         NSApp.activate(ignoringOtherApps: true)
     }

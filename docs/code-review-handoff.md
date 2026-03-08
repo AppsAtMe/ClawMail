@@ -8,7 +8,34 @@ Purpose: Carry forward a full review into a fresh session with enough context to
 
 - Pre-handoff checkpoint before the Google/provider push: `7027ec6` (`Finish account edit polish and quiet NIO warnings`)
 - Best restart point: begin from the newest commit that contains this handoff note, then continue from the unresolved Google CardDAV finding described in the current latest update below
-- Current user-testing status: Apple / iCloud is verified by hand; Google OAuth mail + calendar are working; Google CardDAV is still blocked; Fastmail and Microsoft manual verification remain to do
+- Current user-testing status: Apple / iCloud and Google are verified by hand; Fastmail and Microsoft manual verification remain to do; latest app-level regression under active follow-up was the standard Quit menu item
+
+## Session Update (March 8, 2026, latest latest)
+
+This handoff now reflects the follow-up fix for the app-level quit regression after Google/CardDAV reached a green manual test state.
+
+Completed in this session:
+- Confirmed the regression shape: the standard macOS app quit path was not using the same guarded termination flow as the menu bar `Quit ClawMail` action.
+- Centralized termination handling in `AppDelegate.applicationShouldTerminate(_:)` so every quit route now marks the app as quitting and schedules the same forced-exit fallback if shutdown stalls.
+- Moved the menu bar quit row to read shared app-state quitting status instead of tracking a separate local flag.
+- Added focused app tests covering idempotent fallback scheduling for repeated quit requests.
+- Reinstalled the app and verified the standard app quit event against `/Applications/ClawMail.app`; the installed app exited in about 2.2 seconds.
+
+Current interpretation after this pass:
+- Google/CardDAV is no longer the active blocker from the most recent manual verification.
+- The quit regression was caused by split termination paths, not by the underlying shutdown code itself.
+- Centralizing quit behavior should make the menu bar action, app menu item, keyboard shortcut, and scripted quit requests behave consistently.
+
+Most useful next step for a fresh session:
+1. Continue manual provider verification with Microsoft OAuth.
+2. If any launch-time Keychain prompt still appears, capture fresh `ClawMail Keychain:` lines on the latest installed build.
+3. If quit behavior regresses again, compare the route used (`menu bar`, app menu, `Cmd-Q`, or script) against the shared `applicationShouldTerminate(_:)` path.
+
+Current build/test/install status after these fixes:
+- `swift test`: passed
+- Test suite reported 224 passing tests across 33 suites
+- `make install`: passed
+- Updated app bundle installed to `/Applications/ClawMail.app`
 
 ## Session Update (March 8, 2026, newest latest)
 

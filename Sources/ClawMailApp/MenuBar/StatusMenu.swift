@@ -5,7 +5,6 @@ import ClawMailCore
 struct StatusMenu: View {
     @Environment(AppState.self) private var appState
     @Environment(\.openSettings) private var openSettingsAction
-    @State private var quittingInProgress = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -53,7 +52,7 @@ struct StatusMenu: View {
                 .buttonStyle(.plain)
 
                 Button(action: quitApp) {
-                    if quittingInProgress {
+                    if appState.isQuitting {
                         quittingActionRow
                     } else {
                         actionRow("Quit ClawMail", systemImage: "power")
@@ -61,7 +60,7 @@ struct StatusMenu: View {
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut("q", modifiers: .command)
-                .disabled(quittingInProgress)
+                .disabled(appState.isQuitting)
             }
         }
         .padding(14)
@@ -84,13 +83,7 @@ struct StatusMenu: View {
     }
 
     private func quitApp() {
-        guard !quittingInProgress else { return }
-        quittingInProgress = true
-
-        // Use exit() as fallback if terminate hangs due to stuck NIO connections
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-            exit(0)
-        }
+        guard !appState.isQuitting else { return }
         NSApplication.shared.terminate(nil)
     }
 

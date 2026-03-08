@@ -26,8 +26,10 @@ private final class IPCServerBox: @unchecked Sendable {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let settingsAutoOpenAttempts = 8
     private static let settingsAutoOpenRetryDelay: Duration = .milliseconds(250)
+    private static let forcedTerminationDelay: TimeInterval = 3
 
     let appState = AppState()
+    private let terminationCoordinator = AppTerminationCoordinator()
 
     // MARK: - NSApplicationDelegate
 
@@ -52,6 +54,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Wait with timeout to avoid hanging if shutdown stalls (e.g. stuck NIO connections)
         _ = semaphore.wait(timeout: .now() + 2.0)
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        terminationCoordinator.beginTermination(appState: appState) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.forcedTerminationDelay) {
+                Darwin.exit(0)
+            }
+        }
+        return .terminateNow
     }
 
     // MARK: - Service Lifecycle

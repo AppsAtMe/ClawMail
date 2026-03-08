@@ -548,8 +548,8 @@ private struct OAuthSetupGuideSheet: View {
                         )
                         guideStep(
                             2,
-                            title: "Add the redirect URI during OAuth flow",
-                            body: "ClawMail uses a dynamic localhost redirect URI (e.g., `http://127.0.0.1:54321/oauth/callback`). When you start browser sign-in, ClawMail will show the exact URI with a copy button. Add this to your App Registration under Authentication → Mobile and desktop applications.",
+                            title: "Add the redirect URI (Mobile and desktop platform)",
+                            body: "In Authentication → Add a platform, choose Mobile and desktop applications (NOT Mac/iOS). ClawMail uses a dynamic localhost redirect URI (e.g., `http://127.0.0.1:54321/oauth/callback`). When you start browser sign-in, ClawMail will show the exact URI with a copy button.",
                             links: []
                         )
                         guideStep(

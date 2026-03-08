@@ -262,6 +262,12 @@ public actor SMTPClient {
         }
     }
 
+    // MARK: - Connection Status
+
+    public func isConnected() async -> Bool {
+        return channel?.isActive == true
+    }
+
     // MARK: - Send
 
     public func send(message: OutgoingEmail) async throws -> String {

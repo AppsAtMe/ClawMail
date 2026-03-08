@@ -165,6 +165,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
+            // Ensure API key exists (non-blocking - runs in background)
+            Task.detached {
+                let keychainManager = KeychainManager()
+                let existingKey = await keychainManager.getAPIKey()
+                if existingKey == nil {
+                    do {
+                        _ = try await keychainManager.generateAPIKey()
+                        await MainActor.run { Self.log("Generated new REST API key") }
+                    } catch {
+                        let errorDesc = String(describing: error)
+                        await MainActor.run { Self.log("Failed to generate API key: \(errorDesc)") }
+                    }
+                }
+            }
+
             // Start REST API server
             let apiServer = APIServer(
                 orchestrator: orchestrator,

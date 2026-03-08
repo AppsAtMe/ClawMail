@@ -143,9 +143,28 @@ public actor EmailManager {
         )
     }
 
+    // MARK: - Connection Helpers
+
+    /// Ensures SMTP is connected before attempting to send.
+    /// Reconnects if the connection is not active.
+    private func ensureSMTPConnected() async throws {
+        let isConnected = await smtpClient.isConnected()
+        guard !isConnected else { return }
+
+        _status = .connecting
+        do {
+            try await smtpClient.connect()
+            _status = .connected
+        } catch {
+            _status = .error(String(describing: error))
+            throw error
+        }
+    }
+
     // MARK: - Send Message
 
     public func sendMessage(_ request: SendEmailRequest) async throws -> String {
+        try await ensureSMTPConnected()
         var outgoingAttachments: [OutgoingAttachment] = []
         if let paths = request.attachments {
             for path in paths {
@@ -172,6 +191,8 @@ public actor EmailManager {
     // MARK: - Reply
 
     public func replyToMessage(_ request: ReplyEmailRequest) async throws -> String {
+        try await ensureSMTPConnected()
+
         let original = try await readMessage(id: request.originalMessageId)
 
         let inReplyTo = original.headers["Message-ID"]
@@ -222,6 +243,8 @@ public actor EmailManager {
         body: String?,
         attachments: [String]?
     ) async throws -> String {
+        try await ensureSMTPConnected()
+
         let original = try await readMessage(id: messageId)
 
         let subject: String

@@ -55,9 +55,10 @@ enum ProviderChoice: String, CaseIterable {
 
     var allowsManualEmailEntryDuringSetup: Bool {
         switch self {
-        case .google:
+        case .google, .microsoft:
+            // Email is auto-populated from OAuth identity token
             return false
-        case .apple, .microsoft, .fastmail, .other:
+        case .apple, .fastmail, .other:
             return true
         }
     }

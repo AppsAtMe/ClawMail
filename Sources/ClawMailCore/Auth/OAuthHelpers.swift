@@ -55,6 +55,8 @@ public enum OAuthHelpers {
                 authorizationEndpoint: URL(string: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize")!,
                 tokenEndpoint: URL(string: "https://login.microsoftonline.com/common/oauth2/v2.0/token")!,
                 scopes: [
+                    "openid",
+                    "email",
                     "offline_access",
                     "https://outlook.office.com/IMAP.AccessAsUser.All",
                     "https://outlook.office.com/SMTP.Send",

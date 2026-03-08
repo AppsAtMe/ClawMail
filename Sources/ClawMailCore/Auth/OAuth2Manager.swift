@@ -121,7 +121,7 @@ public actor OAuth2Manager {
             body["client_secret"] = secret
         }
 
-        let tokens = try await postTokenRequest(url: config.tokenEndpoint, body: body)
+        let tokens = try await postTokenRequest(url: config.tokenEndpoint, body: body, provider: provider)
         return tokens
     }
 
@@ -155,7 +155,7 @@ public actor OAuth2Manager {
             body["client_secret"] = secret
         }
 
-        let tokens = try await postTokenRequest(url: config.tokenEndpoint, body: body)
+        let tokens = try await postTokenRequest(url: config.tokenEndpoint, body: body, provider: provider)
         var mergedTokens = tokens
         if mergedTokens.grantedScopes == nil {
             mergedTokens.grantedScopes = existingTokens?.grantedScopes
@@ -187,7 +187,7 @@ public actor OAuth2Manager {
 
     // MARK: - HTTP
 
-    private func postTokenRequest(url: URL, body: [String: String]) async throws -> OAuthTokens {
+    private func postTokenRequest(url: URL, body: [String: String], provider: OAuthProvider? = nil) async throws -> OAuthTokens {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -216,8 +216,8 @@ public actor OAuth2Manager {
         let refreshToken = json["refresh_token"] as? String ?? body["refresh_token"] ?? ""
         let expiresIn = json["expires_in"] as? Int ?? 3600
         let grantedScopes = parseGrantedScopes(from: json["scope"])
-        let identity = parseIdentity(from: json["id_token"], expectedClientId: body["client_id"] ?? "")
         let expiresAt = Date().addingTimeInterval(TimeInterval(expiresIn - 60)) // 60s buffer
+        let identity = provider.flatMap { parseIdentity(from: json["id_token"], expectedClientId: body["client_id"] ?? "", provider: $0) }
 
         return OAuthTokens(
             accessToken: accessToken,
@@ -237,32 +237,50 @@ public actor OAuth2Manager {
         return scopes.isEmpty ? nil : scopes
     }
 
-    private func parseIdentity(from rawValue: Any?, expectedClientId: String) -> OAuthIdentity? {
+    private func parseIdentity(from rawValue: Any?, expectedClientId: String, provider: OAuthProvider) -> OAuthIdentity? {
         guard let idToken = rawValue as? String,
               !expectedClientId.isEmpty,
-              let claims = decodeJWTClaims(idToken),
-              claims.hasTrustedGoogleIssuer,
-              claims.audienceMatches(expectedClientId),
-              let subject = claims.subject,
-              !subject.isEmpty else {
+              let claims = decodeJWTClaims(idToken) else {
             return nil
         }
 
-        return OAuthIdentity(
-            subject: subject,
-            email: claims.email,
-            emailVerified: claims.emailVerified
-        )
+        switch provider {
+        case .google:
+            guard claims.hasTrustedGoogleIssuer,
+                  claims.audienceMatches(expectedClientId),
+                  let subject = claims.subject,
+                  !subject.isEmpty else {
+                return nil
+            }
+            return OAuthIdentity(
+                subject: subject,
+                email: claims.email,
+                emailVerified: claims.emailVerified
+            )
+
+        case .microsoft:
+            guard claims.hasTrustedMicrosoftIssuer,
+                  claims.audienceMatches(expectedClientId),
+                  let subject = claims.subject,
+                  !subject.isEmpty else {
+                return nil
+            }
+            return OAuthIdentity(
+                subject: subject,
+                email: claims.microsoftEmail,
+                emailVerified: claims.microsoftEmailVerified
+            )
+        }
     }
 
-    private func decodeJWTClaims(_ token: String) -> GoogleIDTokenClaims? {
+    private func decodeJWTClaims(_ token: String) -> IDTokenClaims? {
         let segments = token.split(separator: ".")
         guard segments.count == 3,
               let payload = decodeBase64URL(String(segments[1])),
               let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any] else {
             return nil
         }
-        return GoogleIDTokenClaims(payload: object)
+        return IDTokenClaims(payload: object)
     }
 
     private func decodeBase64URL(_ rawValue: String) -> Data? {
@@ -304,12 +322,15 @@ public actor OAuth2Manager {
     }
 }
 
-private struct GoogleIDTokenClaims {
+private struct IDTokenClaims {
     let issuer: String?
     let audience: Any?
     let subject: String?
     let email: String?
     let emailVerified: Bool?
+    // Microsoft-specific claims
+    let preferredUsername: String?
+    let tenantId: String?
 
     init(payload: [String: Any]) {
         issuer = payload["iss"] as? String
@@ -317,10 +338,17 @@ private struct GoogleIDTokenClaims {
         subject = payload["sub"] as? String
         email = payload["email"] as? String
         emailVerified = payload["email_verified"] as? Bool
+        preferredUsername = payload["preferred_username"] as? String
+        tenantId = payload["tid"] as? String
     }
 
     var hasTrustedGoogleIssuer: Bool {
         issuer == "https://accounts.google.com" || issuer == "accounts.google.com"
+    }
+
+    var hasTrustedMicrosoftIssuer: Bool {
+        guard let issuer = issuer else { return false }
+        return issuer.hasPrefix("https://login.microsoftonline.com/") && issuer.hasSuffix("/v2.0")
     }
 
     func audienceMatches(_ clientId: String) -> Bool {
@@ -331,5 +359,18 @@ private struct GoogleIDTokenClaims {
             return audience.contains(clientId)
         }
         return false
+    }
+
+    // Microsoft email can be in preferred_username or email claim
+    var microsoftEmail: String? {
+        // Microsoft typically puts the email in preferred_username for work/school accounts
+        // or in the email claim if the email scope was requested and granted
+        email ?? preferredUsername
+    }
+
+    var microsoftEmailVerified: Bool? {
+        // Microsoft doesn't typically include email_verified in ID tokens
+        // Return nil (unknown) unless explicitly provided
+        emailVerified
     }
 }

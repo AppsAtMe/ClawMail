@@ -219,6 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @MainActor
     private static func requestNotificationAuthorization() async {
         let center = UNUserNotificationCenter.current()
         let authorizationStatus = await notificationAuthorizationStatus(from: center)
@@ -246,6 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @MainActor
     private static func notificationAuthorizationStatus(
         from center: UNUserNotificationCenter
     ) async -> UNAuthorizationStatus {

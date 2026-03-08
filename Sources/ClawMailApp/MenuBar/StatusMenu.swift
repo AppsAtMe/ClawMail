@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import ClawMailCore
 
@@ -5,6 +6,7 @@ import ClawMailCore
 struct StatusMenu: View {
     @Environment(AppState.self) private var appState
     @Environment(\.openSettings) private var openSettingsAction
+    @State private var quitController = MenuBarQuitController()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -94,7 +96,10 @@ struct StatusMenu: View {
 
     private func quitApp() {
         guard !appState.isQuitting else { return }
-        NSApplication.shared.terminate(nil)
+        Self.log("Menu bar quit action invoked; presenting quitting state before termination.")
+        quitController.beginQuit(appState: appState) {
+            NSApplication.shared.terminate(nil)
+        }
     }
 
     private var headerCard: some View {
@@ -225,18 +230,25 @@ struct StatusMenu: View {
     private var quittingActionRow: some View {
         HStack(spacing: 10) {
             Image(systemName: "power")
-                .foregroundStyle(.orange)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Color.orange)
             Text("Quitting...")
+                .font(.body.weight(.semibold))
                 .foregroundStyle(.primary)
             Spacer()
             ProgressView()
                 .controlSize(.small)
+                .tint(.orange)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color.orange.opacity(0.12))
+                .fill(Color.orange.opacity(0.22))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.orange.opacity(0.55), lineWidth: 1)
         )
     }
 
@@ -323,5 +335,10 @@ struct StatusMenu: View {
                 Capsule()
                     .fill(tint)
             )
+    }
+
+    private static func log(_ message: String) {
+        let line = "[StatusMenu] \(message)\n"
+        FileHandle.standardError.write(Data(line.utf8))
     }
 }

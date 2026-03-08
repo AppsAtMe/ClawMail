@@ -40,25 +40,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        let state = appState
+        let apiServer = appState.apiServer
+        let ipcServer = appState.ipcServer
+        let orchestrator = appState.orchestrator
         let semaphore = DispatchSemaphore(value: 0)
-        // Dispatch to a global queue to avoid blocking the main actor,
-        // which would deadlock actors that need MainActor isolation.
-        DispatchQueue.global().async {
-            Task.detached {
-                await state.apiServer?.stop()
-                await state.ipcServer?.stop()
-                await state.orchestrator?.stop()
-                semaphore.signal()
-            }
+
+        Self.log(
+            "applicationWillTerminate: stopping services " +
+            "(api=\(apiServer != nil), ipc=\(ipcServer != nil), orchestrator=\(orchestrator != nil))."
+        )
+
+        Task.detached {
+            await apiServer?.stop()
+            await ipcServer?.stop()
+            await orchestrator?.stop()
+            semaphore.signal()
         }
-        // Wait with timeout to avoid hanging if shutdown stalls (e.g. stuck NIO connections)
-        _ = semaphore.wait(timeout: .now() + 2.0)
+
+        // Wait with timeout to avoid hanging if shutdown stalls (e.g. stuck NIO connections).
+        let completedBeforeTimeout = semaphore.wait(timeout: .now() + 2.0) == .success
+        if completedBeforeTimeout {
+            Self.log("applicationWillTerminate: service shutdown completed before timeout.")
+        } else {
+            Self.log("applicationWillTerminate: service shutdown timed out after 2.0 seconds.")
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let alreadyQuitting = appState.isQuitting
+        Self.log("applicationShouldTerminate: received quit request (alreadyQuitting=\(alreadyQuitting)).")
         terminationCoordinator.beginTermination(appState: appState) {
+            Self.log(
+                "applicationShouldTerminate: scheduling forced exit fallback in \(Self.forcedTerminationDelay) seconds."
+            )
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.forcedTerminationDelay) {
+                Self.log("applicationShouldTerminate: forced exit fallback fired.")
                 Darwin.exit(0)
             }
         }

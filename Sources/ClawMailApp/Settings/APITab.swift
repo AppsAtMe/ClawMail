@@ -11,6 +11,7 @@ struct APITab: View {
     @State private var port: String = "24601"
     @State private var apiKey: String = ""
     @State private var apiKeyVisible = false
+    @State private var apiKeyLoaded = false
     @State private var webhookURL: String = ""
     @State private var keyCopied = false
     @State private var mcpConfigCopied = false
@@ -18,6 +19,8 @@ struct APITab: View {
     @State private var googleClientSecret: String = ""
     @State private var microsoftClientId: String = ""
     @State private var microsoftClientSecret: String = ""
+    @State private var googleSecretSaved = false
+    @State private var microsoftSecretSaved = false
     @State private var errorState: UIErrorState?
 
     init(
@@ -61,31 +64,35 @@ struct APITab: View {
 
             Section("API Key") {
                 HStack {
-                    if apiKeyVisible {
+                    if apiKeyLoaded, apiKeyVisible {
                         Text(apiKey)
                             .font(.system(.body, design: .monospaced))
                             .textSelection(.enabled)
-                    } else {
+                    } else if apiKeyLoaded {
                         Text(String(repeating: "\u{2022}", count: min(apiKey.count, 32)))
                             .font(.system(.body, design: .monospaced))
+                    } else {
+                        Text("Stored in Keychain. Reveal or copy it only when needed.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button(action: { apiKeyVisible.toggle() }) {
-                        Image(systemName: apiKeyVisible ? "eye.slash" : "eye")
+                    Button(action: {
+                        if apiKeyLoaded {
+                            apiKeyVisible.toggle()
+                        } else {
+                            revealAPIKey()
+                        }
+                    }) {
+                        Image(systemName: apiKeyLoaded && apiKeyVisible ? "eye.slash" : "eye")
                     }
                     .buttonStyle(.borderless)
-                    .help(apiKeyVisible ? "Hide API key" : "Show API key")
+                    .help(apiKeyLoaded && apiKeyVisible ? "Hide API key" : "Show API key")
                 }
 
                 HStack {
                     Button("Copy API Key") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(apiKey, forType: .string)
-                        keyCopied = true
-                        Task {
-                            try? await Task.sleep(for: .seconds(2))
-                            keyCopied = false
-                        }
+                        copyAPIKey()
                     }
 
                     if keyCopied {
@@ -182,26 +189,30 @@ struct APITab: View {
                 }
 
                 LabeledContent("Google Client Secret") {
-                    SecureField("Paste if Google provided one", text: $googleClientSecret)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minWidth: 280)
-                        .onChange(of: googleClientSecret) { _, newValue in
-                            Task {
-                                let km = KeychainManager()
-                                do {
-                                    if newValue.isEmpty {
-                                        try await km.deleteOAuthClientSecret(for: .google)
-                                    } else {
-                                        try await km.saveOAuthClientSecret(newValue, for: .google)
-                                    }
-                                } catch {
-                                    await MainActor.run {
-                                        errorState = UIErrorState(action: "Saving Google OAuth client secret", error: error)
-                                        loadState()
-                                    }
-                                }
+                    VStack(alignment: .leading, spacing: 8) {
+                        SecureField("Enter new secret to replace the stored one", text: $googleClientSecret)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(minWidth: 280)
+                        HStack(spacing: 12) {
+                            Button("Save Secret") {
+                                persistOAuthClientSecret(.google, secret: googleClientSecret)
+                            }
+                            .disabled(googleClientSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            Button("Clear Stored Secret") {
+                                clearOAuthClientSecret(.google)
+                            }
+
+                            if googleSecretSaved {
+                                Text("Saved")
+                                    .foregroundStyle(.green)
+                                    .font(.caption)
                             }
                         }
+                        Text("Stored secrets are not auto-loaded when this screen opens, which avoids extra Keychain prompts.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 LabeledContent("Microsoft Client ID") {
@@ -219,26 +230,30 @@ struct APITab: View {
                 }
 
                 LabeledContent("Microsoft Client Secret") {
-                    SecureField("Optional", text: $microsoftClientSecret)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minWidth: 280)
-                        .onChange(of: microsoftClientSecret) { _, newValue in
-                            Task {
-                                let km = KeychainManager()
-                                do {
-                                    if newValue.isEmpty {
-                                        try await km.deleteOAuthClientSecret(for: .microsoft)
-                                    } else {
-                                        try await km.saveOAuthClientSecret(newValue, for: .microsoft)
-                                    }
-                                } catch {
-                                    await MainActor.run {
-                                        errorState = UIErrorState(action: "Saving Microsoft OAuth client secret", error: error)
-                                        loadState()
-                                    }
-                                }
+                    VStack(alignment: .leading, spacing: 8) {
+                        SecureField("Enter new secret to replace the stored one", text: $microsoftClientSecret)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(minWidth: 280)
+                        HStack(spacing: 12) {
+                            Button("Save Secret") {
+                                persistOAuthClientSecret(.microsoft, secret: microsoftClientSecret)
+                            }
+                            .disabled(microsoftClientSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            Button("Clear Stored Secret") {
+                                clearOAuthClientSecret(.microsoft)
+                            }
+
+                            if microsoftSecretSaved {
+                                Text("Saved")
+                                    .foregroundStyle(.green)
+                                    .font(.caption)
                             }
                         }
+                        Text("Stored secrets are not auto-loaded when this screen opens, which avoids extra Keychain prompts.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -274,28 +289,121 @@ struct APITab: View {
         webhookURL = appState.config.webhookURL ?? ""
         googleClientId = appState.config.oauthGoogleClientId ?? ""
         microsoftClientId = appState.config.oauthMicrosoftClientId ?? ""
-        Task {
-            let km = KeychainManager()
-            async let apiKeyResult = km.getAPIKey()
-            async let googleResult = km.getOAuthClientSecret(for: .google)
-            async let microsoftResult = km.getOAuthClientSecret(for: .microsoft)
-            let (apiKeyVal, googleVal, microsoftVal) = await (apiKeyResult, googleResult, microsoftResult)
-            await MainActor.run {
-                if let key = apiKeyVal { apiKey = key }
-                googleClientSecret = googleVal ?? ""
-                microsoftClientSecret = microsoftVal ?? ""
-            }
-        }
+        apiKey = ""
+        apiKeyVisible = false
+        apiKeyLoaded = false
+        googleClientSecret = ""
+        microsoftClientSecret = ""
+        googleSecretSaved = false
+        microsoftSecretSaved = false
     }
 
     private func regenerateAPIKey() {
         Task {
             do {
                 let newKey = try await generateAPIKeyAction()
-                await MainActor.run { apiKey = newKey }
+                await MainActor.run {
+                    apiKey = newKey
+                    apiKeyLoaded = true
+                    apiKeyVisible = true
+                }
             } catch {
                 await MainActor.run {
                     errorState = UIErrorState(action: "Regenerating API key", error: error)
+                }
+            }
+        }
+    }
+
+    private func revealAPIKey() {
+        Task {
+            let key = await KeychainManager().getAPIKey()
+            await MainActor.run {
+                apiKey = key ?? ""
+                apiKeyLoaded = key != nil
+                apiKeyVisible = key != nil
+            }
+        }
+    }
+
+    private func copyAPIKey() {
+        Task {
+            let key: String
+            if apiKeyLoaded {
+                key = apiKey
+            } else {
+                key = await KeychainManager().getAPIKey() ?? ""
+            }
+
+            await MainActor.run {
+                guard !key.isEmpty else { return }
+                apiKey = key
+                apiKeyLoaded = true
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(key, forType: .string)
+                keyCopied = true
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    keyCopied = false
+                }
+            }
+        }
+    }
+
+    private func persistOAuthClientSecret(_ provider: OAuthProvider, secret: String) {
+        Task {
+            let trimmedSecret = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedSecret.isEmpty else { return }
+            let km = KeychainManager()
+            do {
+                try await km.saveOAuthClientSecret(trimmedSecret, for: provider)
+                await MainActor.run {
+                    switch provider {
+                    case .google:
+                        googleClientSecret = ""
+                        googleSecretSaved = true
+                    case .microsoft:
+                        microsoftClientSecret = ""
+                        microsoftSecretSaved = true
+                    }
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        await MainActor.run {
+                            switch provider {
+                            case .google:
+                                googleSecretSaved = false
+                            case .microsoft:
+                                microsoftSecretSaved = false
+                            }
+                        }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    errorState = UIErrorState(action: "Saving \(provider.displayName) OAuth client secret", error: error)
+                }
+            }
+        }
+    }
+
+    private func clearOAuthClientSecret(_ provider: OAuthProvider) {
+        Task {
+            let km = KeychainManager()
+            do {
+                try await km.deleteOAuthClientSecret(for: provider)
+                await MainActor.run {
+                    switch provider {
+                    case .google:
+                        googleClientSecret = ""
+                        googleSecretSaved = false
+                    case .microsoft:
+                        microsoftClientSecret = ""
+                        microsoftSecretSaved = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    errorState = UIErrorState(action: "Clearing \(provider.displayName) OAuth client secret", error: error)
                 }
             }
         }

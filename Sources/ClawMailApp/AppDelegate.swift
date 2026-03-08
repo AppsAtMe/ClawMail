@@ -219,42 +219,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @MainActor
     private static func requestNotificationAuthorization() async {
-        let center = UNUserNotificationCenter.current()
-        let authorizationStatus = await notificationAuthorizationStatus(from: center)
+        // Run on MainActor since UNUserNotificationCenter is main-actor isolated
+        await MainActor.run {
+            let center = UNUserNotificationCenter.current()
 
-        switch authorizationStatus {
-        case .authorized, .provisional, .ephemeral:
-            return
-        case .denied:
-            return
-        case .notDetermined:
-            break
-        @unknown default:
-            return
-        }
+            // Get authorization status synchronously via continuation
+            let authorizationStatus = getNotificationAuthorizationStatusSync(center)
 
-        do {
-            _ = try await center.requestAuthorization(options: [.alert, .sound])
-        } catch {
-            let nsError = error as NSError
-            if nsError.domain == UNErrorDomain,
-               nsError.code == UNError.Code.notificationsNotAllowed.rawValue {
+            switch authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                return
+            case .denied:
+                return
+            case .notDetermined:
+                break
+            @unknown default:
                 return
             }
-            log("Failed to request notification authorization: \(describe(error))")
+
+            // Request authorization
+            let granted = requestAuthorizationSync(center)
+
+            if !granted {
+                log("Notification authorization not granted")
+            }
         }
     }
 
-    @MainActor
-    private static func notificationAuthorizationStatus(
-        from center: UNUserNotificationCenter
-    ) async -> UNAuthorizationStatus {
-        await withCheckedContinuation { continuation in
-            center.getNotificationSettings { settings in
-                continuation.resume(returning: settings.authorizationStatus)
-            }
+    private static func getNotificationAuthorizationStatusSync(
+        _ center: UNUserNotificationCenter
+    ) -> UNAuthorizationStatus {
+        let semaphore = DispatchSemaphore(value: 0)
+        let statusBox = StatusBox()
+        center.getNotificationSettings { settings in
+            statusBox.value = settings.authorizationStatus
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return statusBox.value
+    }
+
+    private static func requestAuthorizationSync(_ center: UNUserNotificationCenter) -> Bool {
+        let semaphore = DispatchSemaphore(value: 0)
+        let grantedBox = GrantedBox()
+        center.requestAuthorization(options: [.alert, .sound]) { result, _ in
+            grantedBox.value = result
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return grantedBox.value
+    }
+
+    /// Thread-safe box for UNAuthorizationStatus
+    private final class StatusBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _value: UNAuthorizationStatus = .notDetermined
+        var value: UNAuthorizationStatus {
+            get { lock.lock(); defer { lock.unlock() }; return _value }
+            set { lock.lock(); defer { lock.unlock() }; _value = newValue }
+        }
+    }
+
+    /// Thread-safe box for Bool
+    private final class GrantedBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _value: Bool = false
+        var value: Bool {
+            get { lock.lock(); defer { lock.unlock() }; return _value }
+            set { lock.lock(); defer { lock.unlock() }; _value = newValue }
         }
     }
 

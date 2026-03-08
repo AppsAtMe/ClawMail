@@ -243,7 +243,7 @@ struct OAuthFlowView: View {
     private var providerSetupHint: String? {
         switch provider {
         case .google:
-            return "Google Cloud setup note: if your OAuth consent screen is in Testing, add your Google account as a test user before trying browser sign-in. If a personal Gmail address is rejected as ineligible, check that the project Audience is set to External. In Google Auth platform > Data Access, make sure the Gmail, Calendar, and Google CardDAV scope `https://www.googleapis.com/auth/carddav` are configured. Google's live CardDAV endpoint asked ClawMail for that exact scope. The email field above is only a browser sign-in hint until Google confirms the authorized account."
+            return "Google Cloud setup note: if your OAuth consent screen is in Testing, add your Google account as a test user before trying browser sign-in. If a personal Gmail address is rejected as ineligible, check that the project Audience is set to External. In Google Auth platform > Data Access, make sure the Gmail, Calendar, and Google CardDAV scope `https://www.googleapis.com/auth/carddav` are configured. Google's live CardDAV endpoint asked ClawMail for that exact scope. The authorized email field above fills in after browser sign-in confirms the account."
         case .microsoft:
             return "Microsoft setup note: the app registration should allow the Mobile and desktop applications platform with http://localhost."
         }

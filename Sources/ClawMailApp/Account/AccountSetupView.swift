@@ -53,6 +53,15 @@ enum ProviderChoice: String, CaseIterable {
         oauthProvider != nil
     }
 
+    var allowsManualEmailEntryDuringSetup: Bool {
+        switch self {
+        case .google:
+            return false
+        case .apple, .microsoft, .fastmail, .other:
+            return true
+        }
+    }
+
     var authMethod: AuthMethod {
         if let oauthProvider {
             return .oauth2(provider: oauthProvider)
@@ -503,6 +512,7 @@ struct AccountSetupView: View {
         case .label:
             LabelEntryView(
                 accountLabel: $accountLabel,
+                displayName: displayName,
                 emailAddress: emailAddress,
                 saveError: saveError,
                 saveInProgress: saveInProgress
@@ -567,7 +577,7 @@ struct AccountSetupView: View {
         case .provider: return true
         case .credentials:
             if provider.usesOAuth {
-                return !emailAddress.isEmpty
+                return oauthEmailReady
                     && !oauthInProgress
                     && oauthCredentialsReady
                     && davURLValidationError == nil
@@ -612,6 +622,13 @@ struct AccountSetupView: View {
 
     private var oauthCredentialsReady: Bool {
         credentialState.oauthCredentialsReady
+    }
+
+    private var oauthEmailReady: Bool {
+        if provider.allowsManualEmailEntryDuringSetup {
+            return !emailAddress.isEmpty
+        }
+        return !configuredEmailAddress.isEmpty
     }
 
     private var passwordCredentialsReady: Bool {
@@ -1017,8 +1034,8 @@ private struct CredentialsFormView: View {
     }
 
     private var emailSection: some View {
-        Group {
-            Text("Email Settings").font(.headline)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(provider.usesOAuth ? "Identity & Sign-In" : "Email Settings").font(.headline)
             if provider.usesOAuth, let authorizedOAuthEmail {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Authorized Email")
@@ -1042,12 +1059,42 @@ private struct CredentialsFormView: View {
                             .stroke(Color.accentColor.opacity(0.35))
                     )
                 }
+            } else if provider.usesOAuth, !provider.allowsManualEmailEntryDuringSetup {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Authorized Email")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
+                        Image(systemName: "person.crop.circle.badge.questionmark")
+                            .foregroundStyle(.secondary)
+                        Text(emailAddress.isEmpty ? "Added after browser sign-in" : emailAddress)
+                            .foregroundStyle(emailAddress.isEmpty ? .secondary : .primary)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(nsColor: .controlBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.2))
+                    )
+                }
             } else {
                 TextField("Email Address", text: $emailAddress)
                     .textFieldStyle(.roundedBorder)
             }
-            TextField("Display Name", text: $displayName)
+            TextField("Sender Name", text: $displayName)
                 .textFieldStyle(.roundedBorder)
+            Text(
+                provider.usesOAuth
+                ? "This is the name recipients see in outgoing mail. ClawMail asks for a separate local account nickname in the final step."
+                : "This is the name recipients see in outgoing mail."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
             if !provider.usesOAuth {
                 SecureField("Password", text: $password)
                     .textFieldStyle(.roundedBorder)
@@ -1074,6 +1121,10 @@ private struct CredentialsFormView: View {
                 }
             } else if let authorizedOAuthEmail {
                 Text("Browser sign-in verified \(authorizedOAuthEmail). ClawMail will use this address for the account. To switch accounts, run browser sign-in again.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if !provider.allowsManualEmailEntryDuringSetup {
+                Text("Click Open Browser below to choose the account. ClawMail fills in the authorized email after browser sign-in completes.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else if mode.isEditing {
@@ -1188,17 +1239,35 @@ private struct CredentialsFormView: View {
 
 private struct LabelEntryView: View {
     @Binding var accountLabel: String
+    let displayName: String
     let emailAddress: String
     var saveError: String?
     var saveInProgress: Bool
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Name Your Account")
+            Text("Name This Account in ClawMail")
                 .font(.title2.bold())
-            Text("Choose a short label to identify this account:")
+            Text("Pick a short local nickname like Work or Personal. This is separate from your sender name.")
                 .foregroundStyle(.secondary)
-            TextField("Account Label (e.g. Work, Personal)", text: $accountLabel)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Sender Identity")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(senderIdentitySummary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(nsColor: .controlBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.2))
+                    )
+            }
+            .frame(maxWidth: 300, alignment: .leading)
+            TextField("Account Nickname (e.g. Work, Personal)", text: $accountLabel)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 300)
                 .onAppear {
@@ -1223,6 +1292,18 @@ private struct LabelEntryView: View {
             }
         }
         .padding()
+    }
+
+    private var senderIdentitySummary: String {
+        let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedEmail = emailAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedDisplayName.isEmpty {
+            return trimmedEmail.isEmpty ? "Filled in from the sign-in step." : trimmedEmail
+        }
+        if trimmedEmail.isEmpty {
+            return trimmedDisplayName
+        }
+        return "\(trimmedDisplayName) <\(trimmedEmail)>"
     }
 }
 

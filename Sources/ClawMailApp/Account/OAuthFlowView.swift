@@ -136,6 +136,12 @@ struct OAuthFlowView: View {
             }
         }
         .padding()
+        .onDisappear {
+            // Cancel OAuth flow if view disappears (app quitting, user navigates away)
+            if inProgress {
+                cancelFlow()
+            }
+        }
     }
 
     // MARK: - OAuth Flow
@@ -205,8 +211,8 @@ struct OAuthFlowView: View {
                 // 4. Open the user's browser
                 NSWorkspace.shared.open(authURL)
 
-                // 5. Wait for the callback (2-minute timeout)
-                let result = try await server.waitForCallback(timeout: .seconds(120))
+                // 5. Wait for the callback (60-second timeout)
+                let result = try await server.waitForCallback(timeout: .seconds(60))
 
                 // 6. Validate state — prevents CSRF attacks (RFC 6749 §10.12)
                 guard OAuthHelpers.constantTimeEqual(result.state, state) else {

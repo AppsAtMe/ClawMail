@@ -26,7 +26,7 @@ struct OAuthFlowView: View {
 
     enum OAuthStatus {
         case waiting
-        case browserOpened
+        case browserOpened(redirectURI: String)
         case completed
         case failed
     }
@@ -55,7 +55,7 @@ struct OAuthFlowView: View {
                     .buttonStyle(.borderedProminent)
                 }
 
-            case .browserOpened:
+            case .browserOpened(let redirectURI):
                 VStack(spacing: 12) {
                     ProgressView()
                         .controlSize(.large)
@@ -66,6 +66,41 @@ struct OAuthFlowView: View {
                     Text("Complete the sign-in in your browser.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                    
+                    // Show redirect URI for easy copying to app registration portals
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Redirect URI (for app registration)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        
+                        HStack(spacing: 8) {
+                            Text(redirectURI)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            
+                            Button {
+                                copyToClipboard(redirectURI)
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Copy redirect URI")
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color(nsColor: .controlBackgroundColor))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.secondary.opacity(0.2))
+                        )
+                    }
+                    .frame(maxWidth: 400)
 
                     if let hint = providerWaitingHint {
                         Text(hint)
@@ -115,7 +150,6 @@ struct OAuthFlowView: View {
         }
 
         inProgress = true
-        status = .browserOpened
 
         Task {
             do {
@@ -127,6 +161,10 @@ struct OAuthFlowView: View {
                 let server = OAuthCallbackServer()
                 await MainActor.run { self.callbackServer = server }
                 let (_, redirectURI) = try await server.start()
+                
+                await MainActor.run {
+                    status = .browserOpened(redirectURI: redirectURI)
+                }
 
                 // 3. Build authorization URL with the actual redirect URI
                 let km = KeychainManager()
@@ -229,6 +267,12 @@ struct OAuthFlowView: View {
                 inProgress = false
             }
         }
+    }
+    
+    private func copyToClipboard(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 
     private func missingClientIDMessage(for provider: OAuthProvider) -> String {

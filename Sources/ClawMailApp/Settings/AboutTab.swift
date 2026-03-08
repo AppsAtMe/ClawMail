@@ -649,7 +649,7 @@ struct AboutAppDetails: Equatable {
             version: bundle.infoDictionaryString(forKey: "CFBundleShortVersionString")
                 ?? ClawMailVersion.current,
             build: bundle.infoDictionaryString(forKey: "CFBundleVersion")
-                ?? "1",
+                ?? ClawMailVersion.build,
             bundleIdentifier: bundle.bundleIdentifier ?? "com.clawmail.app",
             minimumSystemVersion: bundle.infoDictionaryString(forKey: "LSMinimumSystemVersion")
                 ?? "14.0",

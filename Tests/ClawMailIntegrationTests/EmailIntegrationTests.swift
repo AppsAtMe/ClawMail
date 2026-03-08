@@ -200,10 +200,7 @@ struct EmailIntegrationTests {
 
     private func skipIfNoInfra() throws {
         if !TestConfig.isInfrastructureAvailable() {
-            throw TestSkipError()
+            throw TestSkipped("Docker test infrastructure not available (run 'docker compose up -d')")
         }
     }
 }
-
-/// Thrown to skip tests when Docker infrastructure is not running.
-struct TestSkipError: Error {}

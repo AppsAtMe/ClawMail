@@ -213,7 +213,7 @@ struct APITab: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Browser sign-in for Microsoft 365 / Outlook mail.")
                         .font(.headline)
-                    Text("Use an App Registration from Microsoft Entra. Desktop sign-in needs the Mobile and desktop applications platform with `http://localhost`.")
+                    Text("Use an App Registration from Microsoft Entra. The redirect URI will be shown during sign-in (dynamic localhost port).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     HStack(spacing: 16) {
@@ -548,8 +548,8 @@ private struct OAuthSetupGuideSheet: View {
                         )
                         guideStep(
                             2,
-                            title: "Enable the desktop redirect platform",
-                            body: "In Authentication, add the Mobile and desktop applications platform and include `http://localhost`. That is what ClawMail uses for the browser callback.",
+                            title: "Add the redirect URI during OAuth flow",
+                            body: "ClawMail uses a dynamic localhost redirect URI (e.g., `http://127.0.0.1:54321/oauth/callback`). When you start browser sign-in, ClawMail will show the exact URI with a copy button. Add this to your App Registration under Authentication → Mobile and desktop applications.",
                             links: []
                         )
                         guideStep(
@@ -561,7 +561,7 @@ private struct OAuthSetupGuideSheet: View {
                         guideStep(
                             4,
                             title: "Return to ClawMail and rerun browser sign-in",
-                            body: "After you save the Application ID and any needed secret, go back to account setup and run browser sign-in again so ClawMail uses the updated registration.",
+                            body: "After you save the Application ID and any needed secret, go back to account setup and run browser sign-in again. ClawMail will display the redirect URI to add to your Azure app registration.",
                             links: []
                         )
                     }

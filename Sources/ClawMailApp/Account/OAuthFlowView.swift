@@ -144,8 +144,18 @@ struct OAuthFlowView: View {
         // Validate that OAuth client IDs are configured before starting
         let clientId = OAuthHelpers.oauthClientId(for: provider, appConfig: appState.config)
         guard !clientId.isEmpty else {
+            // Redirect to API settings to configure OAuth
             status = .failed
-            errorMessage = missingClientIDMessage(for: provider)
+            errorMessage = "OAuth not configured. Open Settings → API to add your \(provider.displayName) client ID."
+            // Open settings after a short delay so user sees the message
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                await MainActor.run {
+                    appState.settingsTab = .api
+                    openSettingsAction()
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
             return
         }
 

@@ -200,7 +200,16 @@ struct EmailIntegrationTests {
 
     private func skipIfNoInfra() throws {
         if !TestConfig.isInfrastructureAvailable() {
-            throw TestSkipped("Docker test infrastructure not available (run 'docker compose up -d')")
+            throw InfrastructureNotAvailable()
         }
+    }
+}
+
+/// Marker error for when Docker infrastructure is not running.
+/// Integration tests are skipped in CI via --skip flag; this error
+/// provides a clear message when running locally without Docker.
+struct InfrastructureNotAvailable: Error, CustomStringConvertible {
+    var description: String {
+        "Docker test infrastructure not available (run 'docker compose up -d')"
     }
 }

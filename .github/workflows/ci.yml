@@ -33,4 +33,4 @@ jobs:
         run: swift build
 
       - name: Run test suite
-        run: swift test
+        run: swift test --skip ClawMailIntegrationTests

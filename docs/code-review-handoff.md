@@ -10,6 +10,30 @@ Purpose: Carry forward a full review into a fresh session with enough context to
 - Best restart point: begin from the newest commit that contains this handoff note, then continue from the unresolved Google CardDAV finding described in the current latest update below
 - Current user-testing status: Apple / iCloud and Google are verified by hand; Fastmail and Microsoft manual verification remain to do; latest app-level regression under active follow-up was the standard Quit menu item
 
+## Session Update (March 8, 2026, newest checkpoint)
+
+This handoff now reflects the short checkpoint taken just before pausing for a fresh session handoff.
+
+Completed in this session:
+- Confirmed a meaningful improvement in live Keychain behavior: the latest manual launch produced one prompt instead of the earlier multiple prompts.
+- Confirmed that starting the Microsoft flow did not create an extra Keychain prompt on top of that launch-time prompt.
+- Did not make additional code changes in this checkpoint; the repo was already clean and fully pushed through `187220b` (`Unify app quit handling across menu paths`).
+
+Current interpretation after this pass:
+- The eager API/settings Keychain reads appear materially improved in real manual testing.
+- There may still be one remaining launch-time Keychain access to isolate later, but the earlier repeated-prompt behavior appears reduced.
+- The Quit menu remains suspect in manual use even after the `187220b` quit-path unification, so the next session should treat that as still unresolved until re-reproduced and instrumented from the exact UI path the user is using.
+
+Most useful next step for a fresh session:
+1. Reproduce the remaining Quit issue from the exact manual path the user is taking (`menu bar` item versus app menu versus `Cmd-Q`).
+2. If it reproduces, add route-specific logging around `applicationShouldTerminate(_:)`, `applicationWillTerminate(_:)`, and any menu action that calls `NSApplication.shared.terminate(nil)`.
+3. Continue Microsoft OAuth manual verification after the quit-path behavior is understood.
+
+Current build/test/install status after these fixes:
+- No new code changes in this checkpoint
+- Latest pushed commit remains `187220b`
+- Installed app under manual test is `/Applications/ClawMail.app`
+
 ## Session Update (March 8, 2026, latest latest)
 
 This handoff now reflects the follow-up fix for the app-level quit regression after Google/CardDAV reached a green manual test state.

@@ -105,8 +105,8 @@ Recommended path:
 1. Open the [Google Cloud Console credential guide](https://developers.google.com/workspace/guides/create-credentials)
 2. In Google Cloud, create an OAuth client for a `Desktop app`
 3. Configure the OAuth consent screen. If you want to test with a personal `@gmail.com` account, make sure the Google Auth platform `Audience` / user type is `External`. If the app is still in `Testing`, add your Google account as a test user
-4. In Google Auth platform `Data Access`, make sure the Gmail, Calendar, and Google Contacts CardDAV scope ClawMail requests are configured for the app
-5. For Google Contacts via CardDAV, include the legacy Google Contacts scope `https://www.google.com/m8/feeds`. Google can grant the newer People API scope `https://www.googleapis.com/auth/contacts` and still reject CardDAV as under-scoped
+4. In Google Auth platform `Data Access`, make sure the Gmail, Calendar, and Google CardDAV scope `https://www.googleapis.com/auth/carddav` ClawMail requests are configured for the app
+5. For Google Contacts via CardDAV, request `https://www.googleapis.com/auth/carddav`. In live testing, Google's CardDAV endpoint rejected tokens that had `https://www.googleapis.com/auth/contacts` but lacked the narrower CardDAV scope
 6. If you want Google Calendar too, enable `CalDAV API` (`caldav.googleapis.com`) in the same Cloud project before you sign in
 7. Copy the generated `Client ID` and paste it into `Settings > API > OAuth Client IDs > Google Client ID`
 8. If Google gives you a client secret, paste it into `Google Client Secret` in ClawMail. If ClawMail later reports `client_secret is missing`, use the secret from that same OAuth client or recreate the client as a `Desktop app`
@@ -124,9 +124,9 @@ If Google completes browser consent but ClawMail reports `client_secret is missi
 
 If Gmail IMAP and SMTP connect successfully but Google CalDAV still fails with HTTP `403`, the browser sign-in is working and the next thing to check is Google Cloud API enablement for `CalDAV API` (`caldav.googleapis.com`) in that same project.
 
-If Gmail IMAP and SMTP connect successfully but Google CardDAV still fails with HTTP `403`, confirm Google granted the legacy Google Contacts CardDAV scope `https://www.google.com/m8/feeds` during browser sign-in. Google can grant the newer People API contacts scope `https://www.googleapis.com/auth/contacts` and still reject CardDAV as under-scoped, so rerun browser sign-in after adding the legacy scope in Google Auth platform `Data Access`.
+If Gmail IMAP and SMTP connect successfully but Google CardDAV still fails with HTTP `403`, rerun browser sign-in after confirming Google Auth platform `Data Access` includes `https://www.googleapis.com/auth/carddav` for this app. In live testing, Google granted `https://www.googleapis.com/auth/contacts` but the CardDAV endpoint still challenged for the narrower CardDAV scope.
 
-If ClawMail specifically reports `insufficient authentication scopes`, do not just press `Retry Test`. Go back and run Google browser sign-in again after confirming Google Auth platform `Data Access` includes the needed scope (`https://www.googleapis.com/auth/calendar` for CalDAV or `https://www.google.com/m8/feeds` for CardDAV), because the existing token will not pick up newly added scopes by itself.
+If ClawMail specifically reports `insufficient authentication scopes`, do not just press `Retry Test`. Go back and run Google browser sign-in again after confirming Google Auth platform `Data Access` includes the needed permission (`https://www.googleapis.com/auth/calendar` for CalDAV and `https://www.googleapis.com/auth/carddav` for CardDAV), because the existing token will not pick up newly added scopes by itself.
 
 If you need password auth instead, use `Other Mail Account` with Gmail's IMAP/SMTP servers and a Google App Password. Regular account passwords are rejected with `5.7.8 BadCredentials`.
 

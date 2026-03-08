@@ -107,13 +107,17 @@ struct DAVSecurityTests {
         #expect(requests.allSatisfy { $0.url?.host == "contacts.example.com" })
     }
 
-    @Test func cardDAVAuthFailureIncludesJSONErrorDetail() async throws {
+    @Test func cardDAVAuthFailureIncludesJSONErrorDetailAndRequiredScope() async throws {
         let session = makeSession()
         MockDAVURLProtocol.enqueue { request in
             #expect(request.url?.host == "www.googleapis.com")
             return self.response(
                 url: request.url!,
                 status: 403,
+                headers: [
+                    "Content-Type": "application/json; charset=UTF-8",
+                    "WWW-Authenticate": #"Bearer realm="https://accounts.google.com/", error="insufficient_scope", scope="https://www.googleapis.com/auth/carddav""#,
+                ],
                 body: """
                 {"error":{"message":"Request had insufficient authentication scopes."}}
                 """
@@ -131,6 +135,7 @@ struct DAVSecurityTests {
             Issue.record("Expected CardDAV authentication to fail")
         } catch let error as ClawMailError {
             #expect(error.message.contains("insufficient authentication scopes"))
+            #expect(error.message.contains("https://www.googleapis.com/auth/carddav"))
         }
     }
 
@@ -387,6 +392,102 @@ struct DAVSecurityTests {
 
         let requestHosts = MockDAVURLProtocol.recordedRequests().compactMap { $0.url?.host }
         #expect(requestHosts == ["www.googleapis.com", "apidata.googleusercontent.com", "apidata.googleusercontent.com"])
+    }
+
+    @Test func cardDAVFallsBackWhenGoogleAddressBookRedirectRejectsPrincipalPropfind() async throws {
+        let session = makeSession()
+        let redirectedURL = URL(string: "https://www.googleapis.com/carddav/v1/principals/user@example.com/lists/default/")!
+        let redirectedURLWithoutTrailingSlash = URL(string: "https://www.googleapis.com/carddav/v1/principals/user@example.com/lists/default")!
+        let expectedNormalizedURL = normalizedTrailingSlash(redirectedURL.absoluteString)
+
+        MockDAVURLProtocol.enqueueRedirect { request in
+            #expect(request.url?.absoluteString == "https://www.googleapis.com/.well-known/carddav")
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 301,
+                httpVersion: nil,
+                headerFields: ["Location": redirectedURL.absoluteString]
+            )!
+            return (response, URLRequest(url: redirectedURL))
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(normalizedTrailingSlash(request.url?.absoluteString) == expectedNormalizedURL)
+            return self.response(
+                url: request.url!,
+                status: 400,
+                headers: ["Content-Type": "application/json; charset=UTF-8"],
+                body: """
+                {"error":{"message":"Invalid request for current-user-principal at address book resource."}}
+                """
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(request.url == redirectedURL || request.url == redirectedURLWithoutTrailingSlash)
+            return self.response(
+                url: request.url!,
+                body: """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+                  <d:response>
+                    <d:href>/carddav/v1/principals/user@example.com/lists/default/</d:href>
+                    <d:propstat>
+                      <d:prop>
+                        <d:displayname>Default</d:displayname>
+                        <d:resourcetype>
+                          <d:collection/>
+                          <card:addressbook/>
+                        </d:resourcetype>
+                      </d:prop>
+                      <d:status>HTTP/1.1 200 OK</d:status>
+                    </d:propstat>
+                  </d:response>
+                </d:multistatus>
+                """
+            )
+        }
+        MockDAVURLProtocol.enqueue { request in
+            #expect(normalizedTrailingSlash(request.url?.absoluteString) == expectedNormalizedURL)
+            return self.response(
+                url: request.url!,
+                body: """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+                  <d:response>
+                    <d:href>/carddav/v1/principals/user@example.com/lists/default/</d:href>
+                    <d:propstat>
+                      <d:prop>
+                        <d:displayname>Default</d:displayname>
+                        <d:resourcetype>
+                          <d:collection/>
+                          <card:addressbook/>
+                        </d:resourcetype>
+                      </d:prop>
+                      <d:status>HTTP/1.1 200 OK</d:status>
+                    </d:propstat>
+                  </d:response>
+                </d:multistatus>
+                """
+            )
+        }
+
+        let client = try CardDAVClient(
+            baseURL: URL(string: "https://www.googleapis.com/.well-known/carddav")!,
+            credential: .oauthToken(OAuthTokenProvider { "dav-token" }),
+            session: session
+        )
+
+        try await client.authenticate()
+        let books = try await client.listAddressBooks()
+        #expect(books.count == 1)
+        #expect(books.first?.displayName == "Default")
+
+        let requestURLs = MockDAVURLProtocol.recordedRequests().compactMap { $0.url?.absoluteString }
+        #expect(requestURLs.map(normalizedTrailingSlash) == [
+            "https://www.googleapis.com/.well-known/carddav",
+            expectedNormalizedURL,
+            expectedNormalizedURL,
+            expectedNormalizedURL,
+        ])
     }
 
     @Test func calDAVAcceptsAppleShardHomeSetWithoutHTTPRedirect() async throws {
@@ -646,9 +747,9 @@ struct DAVSecurityTests {
         return URLSession(configuration: configuration)
     }
 
-    private func response(url: URL, status: Int = 207, body: String) -> (HTTPURLResponse, Data) {
+    private func response(url: URL, status: Int = 207, headers: [String: String]? = nil, body: String) -> (HTTPURLResponse, Data) {
         (
-            HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!,
+            HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: headers)!,
             Data(body.utf8)
         )
     }
@@ -670,6 +771,14 @@ struct DAVSecurityTests {
           </d:response>
         </d:multistatus>
         """
+    }
+
+    private func normalizedTrailingSlash(_ string: String?) -> String {
+        guard let string else { return "<nil>" }
+        if string.hasSuffix("/") {
+            return String(string.dropLast())
+        }
+        return string
     }
 }
 

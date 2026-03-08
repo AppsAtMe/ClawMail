@@ -169,7 +169,7 @@ struct OAuthHelpersTests {
         #expect(oauth.scopes.contains("openid"))
         #expect(oauth.scopes.contains("email"))
         #expect(oauth.scopes.contains("https://mail.google.com/"))
-        #expect(oauth.scopes.contains("https://www.google.com/m8/feeds"))
+        #expect(oauth.scopes.contains("https://www.googleapis.com/auth/carddav"))
     }
 
     @Test func oauthConfigForMicrosoftUsesCorrectEndpoints() {

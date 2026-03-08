@@ -12,6 +12,7 @@ final class AppState {
 
     var isRunning = false
     var launchError: String?
+    var isQuitting = false
 
     // MARK: - Account State
 

@@ -91,6 +91,22 @@ struct ConnectionTestAuthMaterialTests {
         let material = ConnectionTestAuthMaterial.oauth2(tokens)
 
         #expect(material.grantsGoogleScope("https://www.googleapis.com/auth/calendar") == true)
-        #expect(material.grantsGoogleScope("https://www.google.com/m8/feeds") == false)
+        #expect(material.grantsGoogleScope("https://www.googleapis.com/auth/carddav") == false)
+    }
+
+    @Test func oauthMaterialDoesNotTreatGoogleContactsScopeAsCardDAVScope() {
+        let tokens = OAuthTokens(
+            accessToken: "access-token",
+            refreshToken: "refresh-token",
+            expiresAt: Date().addingTimeInterval(3600),
+            grantedScopes: [
+                "https://mail.google.com/",
+                "https://www.googleapis.com/auth/contacts",
+            ]
+        )
+        let material = ConnectionTestAuthMaterial.oauth2(tokens)
+
+        #expect(material.grantsGoogleScope("https://www.googleapis.com/auth/contacts") == true)
+        #expect(material.grantsGoogleScope("https://www.googleapis.com/auth/carddav") == false)
     }
 }

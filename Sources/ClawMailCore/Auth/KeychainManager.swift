@@ -15,14 +15,17 @@ public actor KeychainManager {
     // MARK: - Password Storage
 
     public func savePassword(accountId: UUID, password: String) throws {
+        log("save password item for account \(accountId.uuidString)")
         try keychain.set(password, key: passwordKey(accountId))
     }
 
     public func getPassword(accountId: UUID) -> String? {
-        try? keychain.get(passwordKey(accountId))
+        log("read password item for account \(accountId.uuidString)")
+        return try? keychain.get(passwordKey(accountId))
     }
 
     public func deletePassword(accountId: UUID) throws {
+        log("delete password item for account \(accountId.uuidString)")
         try keychain.remove(passwordKey(accountId))
     }
 
@@ -34,6 +37,7 @@ public actor KeychainManager {
     }
 
     public func saveOAuthTokens(accountId: UUID, tokens: OAuthTokens) throws {
+        log("save oauth tokens for account \(accountId.uuidString)")
         let data = try JSONEncoder().encode(tokens)
         guard let string = String(data: data, encoding: .utf8) else {
             throw ClawMailError.serverError("Failed to encode OAuth tokens as UTF-8")
@@ -42,23 +46,27 @@ public actor KeychainManager {
     }
 
     public func getOAuthTokens(accountId: UUID) -> OAuthTokens? {
+        log("read oauth tokens for account \(accountId.uuidString)")
         guard let string = try? keychain.get(oauthKey(accountId)),
               let data = string.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(OAuthTokens.self, from: data)
     }
 
     public func deleteOAuthTokens(accountId: UUID) throws {
+        log("delete oauth tokens for account \(accountId.uuidString)")
         try keychain.remove(oauthKey(accountId))
     }
 
     // MARK: - API Key
 
     public func saveAPIKey(_ key: String) throws {
+        log("save api key")
         try keychain.set(key, key: Self.apiKeyAccount)
     }
 
     public func getAPIKey() -> String? {
-        try? keychain.get(Self.apiKeyAccount)
+        log("read api key")
+        return try? keychain.get(Self.apiKeyAccount)
     }
 
     public func generateAPIKey() throws -> String {
@@ -79,22 +87,26 @@ public actor KeychainManager {
 
     public func saveOAuthClientSecret(_ secret: String, for provider: OAuthProvider) throws {
         let key = provider == .google ? Self.googleSecretAccount : Self.microsoftSecretAccount
+        log("save oauth client secret for \(provider.rawValue)")
         try keychain.set(secret, key: key)
     }
 
     public func getOAuthClientSecret(for provider: OAuthProvider) -> String? {
         let key = provider == .google ? Self.googleSecretAccount : Self.microsoftSecretAccount
+        log("read oauth client secret for \(provider.rawValue)")
         return try? keychain.get(key)
     }
 
     public func deleteOAuthClientSecret(for provider: OAuthProvider) throws {
         let key = provider == .google ? Self.googleSecretAccount : Self.microsoftSecretAccount
+        log("delete oauth client secret for \(provider.rawValue)")
         try keychain.remove(key)
     }
 
     // MARK: - Cleanup
 
     public func deleteAll(accountId: UUID) throws {
+        log("delete all items for account \(accountId.uuidString)")
         try keychain.remove(passwordKey(accountId))
         try keychain.remove(oauthKey(accountId))
     }
@@ -107,5 +119,9 @@ public actor KeychainManager {
 
     private func oauthKey(_ accountId: UUID) -> String {
         "oauth-\(accountId.uuidString)"
+    }
+
+    private func log(_ message: String) {
+        fputs("ClawMail Keychain: \(message)\n", stderr)
     }
 }

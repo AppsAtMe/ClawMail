@@ -147,6 +147,13 @@ struct OAuthFlowView: View {
                     loginHint: loginHint
                 )
 
+                logOAuthDebug(
+                    "Authorization request scopes: \(config.scopes.joined(separator: ", "))"
+                )
+                logOAuthDebug(
+                    "Authorization URL (redacted): \(redactedAuthorizationURL(authURL))"
+                )
+
                 // 4. Open the user's browser
                 NSWorkspace.shared.open(authURL)
 
@@ -167,6 +174,17 @@ struct OAuthFlowView: View {
                     redirectURI: redirectURI,
                     codeVerifier: pkce.verifier
                 )
+
+                if let grantedScopes = tokens.grantedScopes, !grantedScopes.isEmpty {
+                    logOAuthDebug(
+                        "Token exchange granted scopes: \(grantedScopes.joined(separator: ", "))"
+                    )
+                } else {
+                    logOAuthDebug("Token exchange did not include a scope list in the response.")
+                }
+                if let authorizedEmail = tokens.authorizedEmail {
+                    logOAuthDebug("Token exchange authorized email: \(authorizedEmail)")
+                }
 
                 // 8. Clean up server
                 await server.stop()
@@ -216,16 +234,16 @@ struct OAuthFlowView: View {
     private func missingClientIDMessage(for provider: OAuthProvider) -> String {
         switch provider {
         case .google:
-            return "Google OAuth client ID not configured. Create a Desktop app OAuth client in Google Cloud Console, then paste its Client ID into Settings → API → OAuth Client IDs."
+            return "Google OAuth client ID not configured. Create a Desktop app OAuth client in Google Cloud Console, then paste its Client ID into Settings → API → Google OAuth."
         case .microsoft:
-            return "Microsoft OAuth client ID not configured. Create an app registration in Microsoft Entra, then paste its Application (client) ID into Settings → API → OAuth Client IDs."
+            return "Microsoft OAuth client ID not configured. Create an app registration in Microsoft Entra, then paste its Application (client) ID into Settings → API → Microsoft OAuth."
         }
     }
 
     private var providerSetupHint: String? {
         switch provider {
         case .google:
-            return "Google Cloud setup note: if your OAuth consent screen is in Testing, add your Google account as a test user before trying browser sign-in. If a personal Gmail address is rejected as ineligible, check that the project Audience is set to External. In Google Auth platform > Data Access, make sure the Gmail, Calendar, and Google Contacts CardDAV scope (`https://www.google.com/m8/feeds`) are configured. The email field above is only a browser sign-in hint until Google confirms the authorized account."
+            return "Google Cloud setup note: if your OAuth consent screen is in Testing, add your Google account as a test user before trying browser sign-in. If a personal Gmail address is rejected as ineligible, check that the project Audience is set to External. In Google Auth platform > Data Access, make sure the Gmail, Calendar, and Google CardDAV scope `https://www.googleapis.com/auth/carddav` are configured. Google's live CardDAV endpoint asked ClawMail for that exact scope. The authorized email field above fills in after browser sign-in confirms the account."
         case .microsoft:
             return "Microsoft setup note: the app registration should allow the Mobile and desktop applications platform with http://localhost."
         }
@@ -251,10 +269,10 @@ struct OAuthFlowView: View {
         let normalized = baseMessage.lowercased()
         if provider == .google {
             if normalized.contains("client_secret is missing") {
-                return "Google completed browser sign-in, but the token exchange rejected this OAuth client because no client secret was configured. Paste the Google Client Secret from the same OAuth client into Settings -> API -> OAuth Client IDs, then try again. If you already have one entered, recreate the Google OAuth client as a Desktop app and use the new Client ID + Client Secret pair."
+                return "Google completed browser sign-in, but the token exchange rejected this OAuth client because no client secret was configured. Paste the Google Client Secret from the same OAuth client into Settings -> API -> Google OAuth, then try again. If you already have one entered, recreate the Google OAuth client as a Desktop app and use the new Client ID + Client Secret pair."
             }
             if normalized.contains("access_denied") {
-                return "Google denied the OAuth request. Make sure this is a Google Desktop app client, the project Audience is External if you are testing with a personal Gmail account, your Google account is added as a test user while the consent screen is in Testing, Google Auth platform > Data Access includes the Gmail, Calendar, and Google Contacts CardDAV scope ClawMail requests, and be aware that the Gmail IMAP/SMTP scope used by ClawMail is a restricted Google scope."
+                return "Google denied the OAuth request. Make sure this is a Google Desktop app client, the project Audience is External if you are testing with a personal Gmail account, your Google account is added as a test user while the consent screen is in Testing, Google Auth platform > Data Access includes the Gmail, Calendar, and Google CardDAV scope `https://www.googleapis.com/auth/carddav` ClawMail requests, and be aware that the Gmail IMAP/SMTP scope used by ClawMail is a restricted Google scope."
             }
             if normalized.contains("timed out") {
                 return "Google sign-in timed out. If the browser showed Error 403: access_denied, check that the project Audience is External for personal Gmail testing, add your Google account as a test user on the Google OAuth consent screen, and retry."
@@ -262,5 +280,27 @@ struct OAuthFlowView: View {
         }
 
         return baseMessage
+    }
+
+    private func logOAuthDebug(_ message: String) {
+        fputs("ClawMail OAuth (\(provider.rawValue)): \(message)\n", stderr)
+    }
+
+    private func redactedAuthorizationURL(_ url: URL) -> String {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems else {
+            return url.absoluteString
+        }
+
+        components.queryItems = queryItems.map { item in
+            switch item.name {
+            case "state", "code_challenge", "login_hint":
+                return URLQueryItem(name: item.name, value: "<redacted>")
+            default:
+                return item
+            }
+        }
+
+        return components.string ?? url.absoluteString
     }
 }

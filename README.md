@@ -136,12 +136,18 @@ For OAuth2:
 
 1. Open the [Microsoft Entra desktop app setup guide](https://learn.microsoft.com/en-us/entra/identity-platform/scenario-desktop-app-configuration)
 2. Create or open your app registration in Microsoft Entra admin center
-3. Copy the `Application (client) ID` and paste it into `Settings > API > OAuth Client IDs > Microsoft Client ID`
-4. In Entra `Authentication`, add the `Mobile and desktop applications` platform with `http://localhost`
-5. If your registration uses a client secret, paste it into `Microsoft Client Secret` in ClawMail
-6. Choose `Microsoft 365 / Outlook` in ClawMail and complete the browser sign-in flow
+3. Set **Supported account types** to "Accounts in any organizational directory and personal Microsoft accounts" (this enables the `/common/` endpoint)
+4. Copy the `Application (client) ID` and paste it into `Settings > API > OAuth Client IDs > Microsoft Client ID`
+5. If your registration uses a client secret, paste it into `Microsoft Client Secret` in ClawMail (many desktop apps work without one)
+6. Choose `Microsoft 365 / Outlook` in ClawMail and click "Open Browser"
+7. **During sign-in**, ClawMail displays the exact redirect URI (e.g., `http://127.0.0.1:54321/oauth/callback`) with a copy button. Add this URI to your Entra app registration under **Authentication → Mobile and desktop applications**
+8. Complete the browser sign-in flow
 
 ClawMail preconfigures Outlook's IMAP/SMTP hosts. CalDAV/CardDAV support varies by tenant, so leave those blank unless your provider documents specific DAV endpoints.
+
+**Common issues:**
+- `invalid_client` (AADSTS7000215): The client secret is required but incorrect. Clear the secret field in ClawMail if your app registration doesn't have one, or ensure the secret value matches exactly.
+- `userAudience` error: The app registration must be set to "All" account types, not "Personal Microsoft accounts only."
 
 For App Passwords: use `Other Mail Account` and enable them via [Microsoft Account Security](https://account.microsoft.com/security) if your organization still allows basic auth.
 
@@ -152,7 +158,11 @@ Fastmail works best with an app password:
 1. Create a [Fastmail app password](https://www.fastmail.help/hc/en-us/articles/360058752854)
 2. In ClawMail, choose `Fastmail`
 3. Enter your Fastmail address and app password
-4. ClawMail prefills `imap.fastmail.com:993`, `smtp.fastmail.com:465`, `https://caldav.fastmail.com`, and `https://carddav.fastmail.com`
+4. ClawMail prefills:
+   - IMAP: `imap.fastmail.com:993`
+   - SMTP: `smtp.fastmail.com:465`
+   - CalDAV: `https://caldav.fastmail.com/dav/calendars/user/`
+   - CardDAV: `https://carddav.fastmail.com/dav/addressbooks/user/`
 
 ## Agent Interfaces
 

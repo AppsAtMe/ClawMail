@@ -2,9 +2,9 @@ import AppKit
 import Foundation
 
 enum BrandingAsset: String, CaseIterable {
-    case appIconArtwork = "AppIconArtwork"
-    case splashArtwork = "SplashArtwork"
-    case splashArtworkSquare = "SplashArtworkSquare"
+    case appIconArtwork = "AppIcon-New"
+    case splashArtwork = "AboutArtwork"
+    case splashArtworkSquare = "AboutArtwork"
 
     var url: URL? {
         Bundle.main.url(forResource: rawValue, withExtension: "png", subdirectory: "Branding")

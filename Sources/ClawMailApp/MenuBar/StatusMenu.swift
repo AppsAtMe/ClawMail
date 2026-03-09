@@ -82,12 +82,14 @@ struct StatusMenu: View {
 
     private func openAbout() {
         appState.settingsTab = .about
-        openSettings()
+        openSettingsAction()
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func openActivityLog() {
         appState.settingsTab = .activityLog
-        openSettings()
+        openSettingsAction()
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func openAccounts(accountID: UUID? = nil) {

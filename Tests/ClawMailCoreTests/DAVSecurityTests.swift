@@ -109,8 +109,9 @@ struct DAVSecurityTests {
 
     @Test func cardDAVAuthFailureIncludesJSONErrorDetailAndRequiredScope() async throws {
         let session = makeSession()
+        // First request: resolveWellKnownIfNeeded (PROPFIND on .well-known)
         MockDAVURLProtocol.enqueue { request in
-            #expect(request.url?.host == "www.googleapis.com")
+            #expect(request.url?.path == "/.well-known/carddav")
             return self.response(
                 url: request.url!,
                 status: 403,
@@ -340,6 +341,7 @@ struct DAVSecurityTests {
         let redirectedURL = URL(string: "https://apidata.googleusercontent.com/carddav/v1/principals/user/lists/default/")!
         let redirectedPrincipalURL = URL(string: "https://apidata.googleusercontent.com/carddav/v1/principals/user/")!
 
+        // First: resolveWellKnownIfNeeded follows redirect
         MockDAVURLProtocol.enqueueRedirect { request in
             #expect(request.url?.absoluteString == "https://www.googleapis.com/.well-known/carddav")
             #expect(request.httpMethod == "PROPFIND")
@@ -355,6 +357,7 @@ struct DAVSecurityTests {
             redirectedRequest.httpMethod = "GET"
             return (response, redirectedRequest)
         }
+        // Second: authenticate() PROPFIND on redirected URL
         MockDAVURLProtocol.enqueue { request in
             #expect(request.url == redirectedURL)
             #expect(request.httpMethod == "PROPFIND")
@@ -368,6 +371,7 @@ struct DAVSecurityTests {
                 )
             )
         }
+        // Third: discoverAddressBookHome
         MockDAVURLProtocol.enqueue { request in
             #expect(request.url?.host == redirectedPrincipalURL.host)
             #expect(request.url?.path == redirectedPrincipalURL.path)
@@ -400,6 +404,7 @@ struct DAVSecurityTests {
         let redirectedURLWithoutTrailingSlash = URL(string: "https://www.googleapis.com/carddav/v1/principals/user@example.com/lists/default")!
         let expectedNormalizedURL = normalizedTrailingSlash(redirectedURL.absoluteString)
 
+        // First: resolveWellKnownIfNeeded follows redirect
         MockDAVURLProtocol.enqueueRedirect { request in
             #expect(request.url?.absoluteString == "https://www.googleapis.com/.well-known/carddav")
             let response = HTTPURLResponse(
@@ -410,6 +415,7 @@ struct DAVSecurityTests {
             )!
             return (response, URLRequest(url: redirectedURL))
         }
+        // Second: authenticate() PROPFIND gets 400, triggering fallback
         MockDAVURLProtocol.enqueue { request in
             #expect(normalizedTrailingSlash(request.url?.absoluteString) == expectedNormalizedURL)
             return self.response(
@@ -421,6 +427,7 @@ struct DAVSecurityTests {
                 """
             )
         }
+        // Third: authenticateViaGoogleAddressBookFallback PROPFIND
         MockDAVURLProtocol.enqueue { request in
             #expect(request.url == redirectedURL || request.url == redirectedURLWithoutTrailingSlash)
             return self.response(
@@ -445,6 +452,7 @@ struct DAVSecurityTests {
                 """
             )
         }
+        // Fourth: listAddressBooks PROPFIND
         MockDAVURLProtocol.enqueue { request in
             #expect(normalizedTrailingSlash(request.url?.absoluteString) == expectedNormalizedURL)
             return self.response(

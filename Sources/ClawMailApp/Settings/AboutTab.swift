@@ -346,21 +346,10 @@ struct AboutTab: View {
     }
 
     private var heroArtwork: some View {
-        ZStack(alignment: .bottomTrailing) {
-            artworkView(asset: .splashArtworkSquare, cornerRadius: 28, fallbackSystemImage: "mail.stack.fill")
-                .frame(width: 220, height: 220)
-
-            artworkView(asset: .appIconArtwork, cornerRadius: 18, fallbackSystemImage: "envelope.badge.fill")
-                .frame(width: 64, height: 64)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.white.opacity(0.9), lineWidth: 2)
-                )
-                .shadow(color: Color.black.opacity(0.16), radius: 16, y: 10)
-                .offset(x: -10, y: -10)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("ClawMail artwork")
+        artworkView(asset: .splashArtworkSquare, cornerRadius: 28, fallbackSystemImage: "mail.stack.fill")
+            .frame(width: 220, height: 220)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("ClawMail artwork")
     }
 
     private var iconBadge: some View {
@@ -379,7 +368,9 @@ struct AboutTab: View {
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)
-                    .scaledToFill()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
             } else {
                 ZStack {
                     LinearGradient(

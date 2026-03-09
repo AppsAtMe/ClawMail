@@ -21,6 +21,8 @@ struct APITab: View {
     @State private var microsoftClientSecret: String = ""
     @State private var googleSecretSaved = false
     @State private var microsoftSecretSaved = false
+    @State private var googleSecretExists = false
+    @State private var microsoftSecretExists = false
     @State private var presentedGuide: OAuthSetupGuideProvider?
     @State private var errorState: UIErrorState?
 
@@ -200,6 +202,10 @@ struct APITab: View {
                                 Text("Saved")
                                     .foregroundStyle(.green)
                                     .font(.caption)
+                            } else if googleSecretExists {
+                                Text("Stored")
+                                    .foregroundStyle(.secondary)
+                                    .font(.caption)
                             }
                         }
                         Text("Google's desktop docs say the secret can be optional, but if ClawMail reports `client_secret is missing`, store it here and sign in again.")
@@ -257,6 +263,10 @@ struct APITab: View {
                                 Text("Saved")
                                     .foregroundStyle(.green)
                                     .font(.caption)
+                            } else if microsoftSecretExists {
+                                Text("Stored")
+                                    .foregroundStyle(.secondary)
+                                    .font(.caption)
                             }
                         }
                         Text("Many desktop registrations can work without a secret, so only save one if your Microsoft setup actually issued it.")
@@ -308,6 +318,17 @@ struct APITab: View {
         microsoftClientSecret = ""
         googleSecretSaved = false
         microsoftSecretSaved = false
+        
+        // Check if OAuth secrets exist in keychain
+        Task {
+            let km = KeychainManager()
+            let googleExists = (try? await km.getOAuthClientSecret(for: .google)) != nil
+            let microsoftExists = (try? await km.getOAuthClientSecret(for: .microsoft)) != nil
+            await MainActor.run {
+                googleSecretExists = googleExists
+                microsoftSecretExists = microsoftExists
+            }
+        }
     }
 
     private func regenerateAPIKey() {
@@ -374,9 +395,11 @@ struct APITab: View {
                     case .google:
                         googleClientSecret = ""
                         googleSecretSaved = true
+                        googleSecretExists = true
                     case .microsoft:
                         microsoftClientSecret = ""
                         microsoftSecretSaved = true
+                        microsoftSecretExists = true
                     }
                     Task {
                         try? await Task.sleep(for: .seconds(2))
@@ -408,9 +431,11 @@ struct APITab: View {
                     case .google:
                         googleClientSecret = ""
                         googleSecretSaved = false
+                        googleSecretExists = false
                     case .microsoft:
                         microsoftClientSecret = ""
                         microsoftSecretSaved = false
+                        microsoftSecretExists = false
                     }
                 }
             } catch {

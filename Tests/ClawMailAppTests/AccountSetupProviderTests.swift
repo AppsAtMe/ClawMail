@@ -65,8 +65,8 @@ struct AccountSetupProviderTests {
         )
         #expect(
             ProviderChoice.fastmail.defaultDAVSettings(emailAddress: "user@fastmail.com") == ProviderDAVSettings(
-                caldavURL: "https://caldav.fastmail.com",
-                carddavURL: "https://carddav.fastmail.com"
+                caldavURL: "https://caldav.fastmail.com/dav/calendars/user/",
+                carddavURL: "https://carddav.fastmail.com/dav/addressbooks/user/"
             )
         )
     }

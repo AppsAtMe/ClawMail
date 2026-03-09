@@ -322,8 +322,8 @@ struct APITab: View {
         // Check if OAuth secrets exist in keychain
         Task {
             let km = KeychainManager()
-            let googleExists = (try? await km.getOAuthClientSecret(for: .google)) != nil
-            let microsoftExists = (try? await km.getOAuthClientSecret(for: .microsoft)) != nil
+            let googleExists = await km.getOAuthClientSecret(for: .google) != nil
+            let microsoftExists = await km.getOAuthClientSecret(for: .microsoft) != nil
             await MainActor.run {
                 googleSecretExists = googleExists
                 microsoftSecretExists = microsoftExists

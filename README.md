@@ -1,3 +1,5 @@
+![ClawMail](GitHubBanner.png)
+
 # ClawMail
 
 Agent-first email client for macOS. Gives AI agents full programmatic access to email, calendar, contacts, and tasks via MCP, CLI, and REST API.

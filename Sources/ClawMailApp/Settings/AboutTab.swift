@@ -53,9 +53,9 @@ struct AboutTab: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.92, green: 0.97, blue: 1.00),
-                            Color(red: 0.80, green: 0.91, blue: 1.00),
-                            Color(red: 0.67, green: 0.84, blue: 0.99)
+                            Color(red: 0.10, green: 0.25, blue: 0.45),
+                            Color(red: 0.05, green: 0.15, blue: 0.30),
+                            Color(red: 0.02, green: 0.08, blue: 0.18)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -63,20 +63,8 @@ struct AboutTab: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .stroke(Color.white.opacity(0.45), lineWidth: 1)
+                        .stroke(Color.white.opacity(0.25), lineWidth: 1)
                 )
-
-            Circle()
-                .fill(Color.white.opacity(0.42))
-                .frame(width: 240, height: 240)
-                .blur(radius: 18)
-                .offset(x: 220, y: -120)
-
-            RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .fill(Color.white.opacity(0.18))
-                .frame(width: 220, height: 220)
-                .rotationEffect(.degrees(12))
-                .offset(x: 160, y: 105)
 
             ViewThatFits(in: .horizontal) {
                 heroRowLayout

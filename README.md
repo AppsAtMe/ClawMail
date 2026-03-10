@@ -83,6 +83,8 @@ Removes the app, symlinks, and LaunchAgent.
 
 4. **Connect an agent** — see [Agent Interfaces](#agent-interfaces) below.
 
+**Need help?** See [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md) for detailed setup instructions and troubleshooting for all providers.
+
 For manual testing, a handy way to keep app logs visible without blocking your shell is:
 
 ```bash
@@ -439,7 +441,10 @@ ClawMail/
 - [`SPECIFICATION.md`](SPECIFICATION.md) — Complete feature specification
 - [`BLUEPRINT.md`](BLUEPRINT.md) — Implementation blueprint with build phases
 - [`ROADMAP.md`](ROADMAP.md) — Remaining gaps, deferred features, and testing backlog
+- [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md) — **Account setup guide and troubleshooting** for all providers
 - [`docs/operations-reference.md`](docs/operations-reference.md) — Runtime services, files, approvals, and operational behavior
+
+**Troubleshooting tip:** If you run into issues during account setup, check [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md) for provider-specific troubleshooting steps.
 
 ## License
 

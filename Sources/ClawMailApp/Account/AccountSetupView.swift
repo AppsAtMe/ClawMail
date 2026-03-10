@@ -985,6 +985,17 @@ private struct CredentialsFormView: View {
                     optionalSection
                 } else {
                     Divider()
+                    if provider == .other {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Server Settings")
+                                .font(.headline)
+                            Text("Enter your email provider's IMAP and SMTP server details. Not sure what to enter?")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Link("View Account Setup Guide →", destination: URL(string: "https://github.com/clawmail/ClawMail/blob/main/docs/ACCOUNTS.md")!)
+                                .font(.caption)
+                        }
+                    }
                     imapSection
                     smtpSection
                     Divider()
@@ -1117,8 +1128,14 @@ private struct CredentialsFormView: View {
                         .foregroundStyle(.secondary)
                     Link("Create a Fastmail app password", destination: URL(string: "https://www.fastmail.help/hc/en-us/articles/360058752854")!)
                         .font(.caption)
-                case .google, .microsoft, .other:
+                case .google, .microsoft:
                     EmptyView()
+                case .other:
+                    Text("Enter your email provider's IMAP/SMTP server details. See the Account Setup Guide for help finding these settings.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Link("Open Account Setup Guide", destination: URL(string: "https://github.com/clawmail/ClawMail/blob/main/docs/ACCOUNTS.md")!)
+                        .font(.caption)
                 }
             } else if let authorizedOAuthEmail {
                 Text("Browser sign-in verified \(authorizedOAuthEmail). ClawMail will use this address for the account. To switch accounts, run browser sign-in again.")

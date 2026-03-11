@@ -992,7 +992,7 @@ private struct CredentialsFormView: View {
                             Text("Enter your email provider's IMAP and SMTP server details. Not sure what to enter?")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Link("View Account Setup Guide →", destination: URL(string: "https://github.com/clawmail/ClawMail/blob/main/docs/ACCOUNTS.md")!)
+                            Link("View Account Setup Guide →", destination: URL(string: "https://github.com/AppsAtMe/ClawMail/blob/main/docs/ACCOUNTS.md")!)
                                 .font(.caption)
                         }
                     }
@@ -1134,7 +1134,7 @@ private struct CredentialsFormView: View {
                     Text("Enter your email provider's IMAP/SMTP server details. See the Account Setup Guide for help finding these settings.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Link("Open Account Setup Guide", destination: URL(string: "https://github.com/clawmail/ClawMail/blob/main/docs/ACCOUNTS.md")!)
+                    Link("Open Account Setup Guide", destination: URL(string: "https://github.com/AppsAtMe/ClawMail/blob/main/docs/ACCOUNTS.md")!)
                         .font(.caption)
                 }
             } else if let authorizedOAuthEmail {

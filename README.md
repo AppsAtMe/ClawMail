@@ -34,7 +34,7 @@ The human UI exists only for setup and monitoring. All operations flow through t
 ### From Source
 
 ```bash
-git clone https://github.com/clawmail/ClawMail.git
+git clone https://github.com/AppsAtMe/ClawMail.git
 cd ClawMail
 make install
 ```

@@ -2,7 +2,6 @@
 .build/
 build/
 .swiftpm/
-Package.resolved
 *.xcodeproj/
 xcuserdata/
 DerivedData/
@@ -13,6 +12,9 @@ DerivedData/
 
 # Claude Code
 .claude/
+
+# Internal dev notes
+internal/
 
 # IDE
 .vscode/

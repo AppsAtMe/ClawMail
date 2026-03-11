@@ -80,8 +80,8 @@ struct AccountSetupProviderTests {
     @Test func providerInferenceRecognizesExistingAppleAndFastmailAccounts() {
         let appleAccount = Account(
             label: "Mac.com",
-            emailAddress: "amitchell@mac.com",
-            displayName: "Andrew Mitchell",
+            emailAddress: "test@icloud.com",
+            displayName: "Test User",
             authMethod: .password,
             imapHost: "imap.mail.me.com",
             smtpHost: "smtp.mail.me.com"

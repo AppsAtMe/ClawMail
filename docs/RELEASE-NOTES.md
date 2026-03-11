@@ -101,7 +101,6 @@ Post-1.0 roadmap includes:
 
 ClawMail is an open-source agent-first email client created by Andrew Mitchell and Max Headroom.
 
-**Homepage:** https://clawmail.app  
 **GitHub:** https://github.com/AppsAtMe/ClawMail  
 **Issues:** https://github.com/AppsAtMe/ClawMail/issues  
 **Discussions:** https://github.com/AppsAtMe/ClawMail/discussions

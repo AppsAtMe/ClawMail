@@ -2,10 +2,10 @@ cask "clawmail" do
   version "1.0.0"
   sha256 :no_check # computed at release time
 
-  url "https://github.com/clawmail/ClawMail/releases/download/v#{version}/ClawMail-#{version}.dmg"
+  url "https://github.com/AppsAtMe/ClawMail/releases/download/v#{version}/ClawMail-#{version}.dmg"
   name "ClawMail"
   desc "Agent-first email client for macOS"
-  homepage "https://github.com/clawmail/ClawMail"
+  homepage "https://github.com/AppsAtMe/ClawMail"
 
   depends_on macos: ">= :sonoma"
 

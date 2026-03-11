@@ -74,8 +74,8 @@ struct AccountUpdateTests {
     private func makeAccount(label: String) -> Account {
         Account(
             label: label,
-            emailAddress: "amitchell@mac.com",
-            displayName: "Andrew Mitchell",
+            emailAddress: "test@example.com",
+            displayName: "Test User",
             authMethod: .password,
             imapHost: "imap.mail.me.com",
             smtpHost: "smtp.mail.me.com",

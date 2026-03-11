@@ -199,7 +199,7 @@ Leave these blank if you only need email.
    - Provider name
    - Error message (exact text)
    - Steps you've tried
-3. **Join [Discord](https://discord.gg/clawmail)** for community help
+3. **Start a [GitHub Discussion](https://github.com/AppsAtMe/ClawMail/discussions)** for community help
 
 ---
 

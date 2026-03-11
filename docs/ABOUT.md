@@ -85,7 +85,6 @@ ClawMail builds on the work of many open source projects and AI research teams:
 
 ## Connect
 
-- **Website:** https://clawmail.app
 - **GitHub:** https://github.com/AppsAtMe/ClawMail
 - **Issues:** https://github.com/AppsAtMe/ClawMail/issues
 - **Discussions:** https://github.com/AppsAtMe/ClawMail/discussions

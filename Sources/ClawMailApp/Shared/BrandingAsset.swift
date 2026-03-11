@@ -1,23 +1,41 @@
 import AppKit
 import Foundation
 
-enum BrandingAsset: String, CaseIterable {
-    case appIconArtwork = "AppIcon-New"
-    case splashArtwork = "AboutArtwork"
-    case splashArtworkSquare = "AboutArtwork-Square"
+enum BrandingAsset: CaseIterable {
+    case appIconArtwork
+    case aboutArtwork
+    case splashArtwork
+    case splashArtworkSquare
 
-    var filename: String {
-        // Both splash variants use the same AboutArtwork image
+    private var filename: String {
         switch self {
-        case .splashArtworkSquare:
+        case .appIconArtwork:
+            return "AppIconArtwork"
+        case .aboutArtwork:
             return "AboutArtwork"
-        default:
-            return rawValue
+        case .splashArtwork:
+            return "SplashArtwork"
+        case .splashArtworkSquare:
+            return "SplashArtworkSquare"
+        }
+    }
+
+    private var fileExtension: String {
+        switch self {
+        case .appIconArtwork:
+            return "png"
+        case .aboutArtwork, .splashArtwork, .splashArtworkSquare:
+            return "png"
         }
     }
 
     var url: URL? {
-        Bundle.main.url(forResource: filename, withExtension: "png", subdirectory: "Branding")
+        switch self {
+        case .appIconArtwork:
+            Bundle.main.url(forResource: filename, withExtension: fileExtension, subdirectory: "Branding")
+        case .aboutArtwork, .splashArtwork, .splashArtworkSquare:
+            Bundle.main.url(forResource: filename, withExtension: fileExtension, subdirectory: "Branding")
+        }
     }
 
     var image: NSImage? {

@@ -65,6 +65,13 @@ struct AboutTab: View {
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
                         .stroke(Color.white.opacity(0.25), lineWidth: 1)
                 )
+                .overlay(alignment: .topLeading) {
+                    Circle()
+                        .fill(Color.white.opacity(0.16))
+                        .frame(width: 240, height: 240)
+                        .blur(radius: 70)
+                        .offset(x: -36, y: -92)
+                }
 
             ViewThatFits(in: .horizontal) {
                 heroRowLayout
@@ -72,6 +79,7 @@ struct AboutTab: View {
             }
             .padding(24)
         }
+        .environment(\.colorScheme, .dark)
     }
 
     private var heroRowLayout: some View {
@@ -99,21 +107,21 @@ struct AboutTab: View {
                 iconBadge
                 Text("About ClawMail")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color(red: 0.05, green: 0.24, blue: 0.42))
+                    .foregroundStyle(heroEyebrowColor)
             }
 
             Text(details.appName)
                 .font(.system(size: 32, weight: .bold, design: .rounded))
-                .foregroundStyle(Color(red: 0.04, green: 0.18, blue: 0.33))
+                .foregroundStyle(heroTitleColor)
 
             Text("Menu bar control for mail, calendar, contacts, tasks, and automation on macOS.")
                 .font(.body.weight(.medium))
-                .foregroundStyle(Color(red: 0.08, green: 0.24, blue: 0.39))
+                .foregroundStyle(heroBodyColor)
                 .fixedSize(horizontal: false, vertical: true)
 
             Text("Designed to stay lightweight when several accounts are active, while keeping support paths and runtime details close at hand.")
                 .font(.callout)
-                .foregroundStyle(Color(red: 0.08, green: 0.24, blue: 0.39).opacity(0.80))
+                .foregroundStyle(heroSecondaryBodyColor)
                 .fixedSize(horizontal: false, vertical: true)
 
             heroMetadata
@@ -165,7 +173,7 @@ struct AboutTab: View {
             copiedSupportInfo = false
             revealAction(details.supportDirectoryURL)
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(HeroActionButtonStyle(kind: .primary))
     }
 
     private var copySupportButton: some View {
@@ -173,7 +181,7 @@ struct AboutTab: View {
             copySupportAction(details.supportSummary)
             copiedSupportInfo = true
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(HeroActionButtonStyle(kind: .secondary))
     }
 
     private var metricsGrid: some View {
@@ -334,8 +342,8 @@ struct AboutTab: View {
     }
 
     private var heroArtwork: some View {
-        artworkView(asset: .splashArtworkSquare, cornerRadius: 28, fallbackSystemImage: "mail.stack.fill")
-            .frame(width: 220, height: 220)
+        artworkView(asset: .appIconArtwork, cornerRadius: 28, fallbackSystemImage: "mail.stack.fill")
+            .frame(width: 196, height: 196)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("ClawMail artwork")
     }
@@ -343,10 +351,6 @@ struct AboutTab: View {
     private var iconBadge: some View {
         artworkView(asset: .appIconArtwork, cornerRadius: 14, fallbackSystemImage: "envelope.badge.fill")
             .frame(width: 42, height: 42)
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.85), lineWidth: 1.5)
-            )
             .shadow(color: Color.black.opacity(0.14), radius: 10, y: 6)
     }
 
@@ -377,10 +381,6 @@ struct AboutTab: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(Color.white.opacity(0.22), lineWidth: 1)
-        )
         .shadow(color: Color.black.opacity(0.12), radius: 18, y: 10)
     }
 
@@ -394,6 +394,22 @@ struct AboutTab: View {
                 Capsule(style: .continuous)
                     .fill(Color.white.opacity(0.72))
             )
+    }
+
+    private var heroEyebrowColor: Color {
+        Color.white.opacity(0.74)
+    }
+
+    private var heroTitleColor: Color {
+        Color.white.opacity(0.98)
+    }
+
+    private var heroBodyColor: Color {
+        Color.white.opacity(0.90)
+    }
+
+    private var heroSecondaryBodyColor: Color {
+        Color.white.opacity(0.72)
     }
 
     private func metricCard(title: String, value: String, subtitle: String, tint: Color) -> some View {
@@ -643,5 +659,59 @@ struct AboutAppDetails: Equatable {
 private extension Bundle {
     func infoDictionaryString(forKey key: String) -> String? {
         object(forInfoDictionaryKey: key) as? String
+    }
+}
+
+private struct HeroActionButtonStyle: ButtonStyle {
+    enum Kind {
+        case primary
+        case secondary
+    }
+
+    let kind: Kind
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(backgroundColor(configuration.isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(borderColor(configuration.isPressed), lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
+    private var foregroundColor: Color {
+        switch kind {
+        case .primary:
+            return Color(red: 0.05, green: 0.15, blue: 0.29)
+        case .secondary:
+            return Color.white.opacity(0.94)
+        }
+    }
+
+    private func backgroundColor(_ isPressed: Bool) -> Color {
+        switch kind {
+        case .primary:
+            return Color.white.opacity(isPressed ? 0.82 : 0.94)
+        case .secondary:
+            return Color.white.opacity(isPressed ? 0.16 : 0.10)
+        }
+    }
+
+    private func borderColor(_ isPressed: Bool) -> Color {
+        switch kind {
+        case .primary:
+            return Color.white.opacity(isPressed ? 0.18 : 0.22)
+        case .secondary:
+            return Color.white.opacity(isPressed ? 0.42 : 0.28)
+        }
     }
 }

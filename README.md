@@ -104,56 +104,27 @@ Apple documents iCloud Mail for third-party apps via app-specific passwords and 
 
 ### Google Setup
 
-Recommended path:
-
 1. Open the [Google Cloud Console credential guide](https://developers.google.com/workspace/guides/create-credentials)
-2. In Google Cloud, create an OAuth client for a `Desktop app`
-3. Configure the OAuth consent screen. If you want to test with a personal `@gmail.com` account, make sure the Google Auth platform `Audience` / user type is `External`. If the app is still in `Testing`, add your Google account as a test user
-4. In Google Auth platform `Data Access`, make sure the Gmail, Calendar, and Google CardDAV scope `https://www.googleapis.com/auth/carddav` ClawMail requests are configured for the app
-5. For Google Contacts via CardDAV, request `https://www.googleapis.com/auth/carddav`. In live testing, Google's CardDAV endpoint rejected tokens that had `https://www.googleapis.com/auth/contacts` but lacked the narrower CardDAV scope
-6. If you want Google Calendar too, enable `CalDAV API` (`caldav.googleapis.com`) in the same Cloud project before you sign in
-7. Copy the generated `Client ID` and paste it into `Settings > API > OAuth Client IDs > Google Client ID`
-8. If Google gives you a client secret, paste it into `Google Client Secret` in ClawMail. If ClawMail later reports `client_secret is missing`, use the secret from that same OAuth client or recreate the client as a `Desktop app`
-9. In ClawMail, choose `Google` and complete the browser sign-in flow
-10. The email field in ClawMail is only a browser sign-in hint. After Google sign-in completes, ClawMail replaces it with the authorized Google address returned by Google so the account matches what you actually approved
-11. ClawMail preconfigures Google's CardDAV discovery URL and derives the primary CalDAV URL from the authorized email address
+2. Create an OAuth client for a `Desktop app`
+3. Configure the OAuth consent screen (set Audience to `External` for personal accounts)
+4. Enable required APIs: Gmail, CalDAV API (for calendar), and CardDAV scope
+5. Copy the `Client ID` to `Settings > API > OAuth Client IDs > Google Client ID` in ClawMail
+6. Choose `Google` in ClawMail and complete the browser sign-in
 
-If Google shows `Error 403: access_denied`, the most common causes are:
-- The OAuth client is not a `Desktop app`
-- The Google Auth platform `Audience` / user type is `Internal`, which only allows members of that Workspace or Cloud Identity organization
-- Your Google account is not listed as a test user while the consent screen is still in `Testing`
-- The app is requesting the restricted Gmail scope `https://mail.google.com/` without the broader verification Google requires for distribution beyond testing
-
-If Google completes browser consent but ClawMail reports `client_secret is missing`, the token endpoint is rejecting that client without a secret. Paste the Google Client Secret from the same OAuth client into `Settings > API > OAuth Client IDs`, or recreate the client as a `Desktop app` and use the new Client ID and Client Secret together.
-
-If Gmail IMAP and SMTP connect successfully but Google CalDAV still fails with HTTP `403`, the browser sign-in is working and the next thing to check is Google Cloud API enablement for `CalDAV API` (`caldav.googleapis.com`) in that same project.
-
-If Gmail IMAP and SMTP connect successfully but Google CardDAV still fails with HTTP `403`, rerun browser sign-in after confirming Google Auth platform `Data Access` includes `https://www.googleapis.com/auth/carddav` for this app. In live testing, Google granted `https://www.googleapis.com/auth/contacts` but the CardDAV endpoint still challenged for the narrower CardDAV scope.
-
-If ClawMail specifically reports `insufficient authentication scopes`, do not just press `Retry Test`. Go back and run Google browser sign-in again after confirming Google Auth platform `Data Access` includes the needed permission (`https://www.googleapis.com/auth/calendar` for CalDAV and `https://www.googleapis.com/auth/carddav` for CardDAV), because the existing token will not pick up newly added scopes by itself.
-
-If you need password auth instead, use `Other Mail Account` with Gmail's IMAP/SMTP servers and a Google App Password. Regular account passwords are rejected with `5.7.8 BadCredentials`.
+See [docs/ACCOUNTS.md](docs/ACCOUNTS.md) for troubleshooting common Google OAuth issues.
 
 ### Microsoft 365 / Outlook Setup
 
-For OAuth2:
-
 1. Open the [Microsoft Entra desktop app setup guide](https://learn.microsoft.com/en-us/entra/identity-platform/scenario-desktop-app-configuration)
-2. Create or open your app registration in Microsoft Entra admin center
-3. Set **Supported account types** to "Accounts in any organizational directory and personal Microsoft accounts" (this enables the `/common/` endpoint)
-4. Copy the `Application (client) ID` and paste it into `Settings > API > OAuth Client IDs > Microsoft Client ID`
-5. If your registration uses a client secret, paste it into `Microsoft Client Secret` in ClawMail (many desktop apps work without one)
-6. Choose `Microsoft 365 / Outlook` in ClawMail and click "Open Browser"
-7. **During sign-in**, ClawMail displays the exact redirect URI (e.g., `http://127.0.0.1:54321/oauth/callback`) with a copy button. Add this URI to your Entra app registration under **Authentication → Mobile and desktop applications**
-8. Complete the browser sign-in flow
+2. Create an app registration with **Supported account types** set to "Accounts in any organizational directory and personal Microsoft accounts"
+3. Copy the `Application (client) ID` to `Settings > API > OAuth Client IDs > Microsoft Client ID` in ClawMail
+4. Choose `Microsoft 365 / Outlook` in ClawMail and click "Open Browser"
+5. Add the displayed redirect URI to your Entra app registration under **Authentication → Mobile and desktop applications**
+6. Complete the browser sign-in flow
 
-ClawMail preconfigures Outlook's IMAP/SMTP hosts. CalDAV/CardDAV support varies by tenant, so leave those blank unless your provider documents specific DAV endpoints.
+CalDAV/CardDAV support varies by tenant — leave blank unless your provider documents specific DAV endpoints.
 
-**Common issues:**
-- `invalid_client` (AADSTS7000215): The client secret is required but incorrect. Clear the secret field in ClawMail if your app registration doesn't have one, or ensure the secret value matches exactly.
-- `userAudience` error: The app registration must be set to "All" account types, not "Personal Microsoft accounts only."
-
-For App Passwords: use `Other Mail Account` and enable them via [Microsoft Account Security](https://account.microsoft.com/security) if your organization still allows basic auth.
+See [docs/ACCOUNTS.md](docs/ACCOUNTS.md) for troubleshooting Microsoft OAuth issues.
 
 ### Fastmail Setup
 

@@ -1,4 +1,4 @@
-# OpenClaw Release Notes
+# ClawMail Release Notes
 
 ## Version 1.0.0 — Initial Release
 
@@ -9,44 +9,68 @@
 
 ### 🎉 Initial Release
 
-OpenClaw 1.0.0 marks our first stable release — a personal AI assistant platform designed for seamless human-agent collaboration.
+ClawMail 1.0.0 is our first stable release — an agent-first email client for macOS that gives AI agents programmatic access to email, calendar, contacts, and tasks.
 
 ### ✨ Key Features
 
-**Core Platform**
-- Multi-channel messaging (Discord, Slack, Telegram, iMessage, Signal, more)
-- Session-based agent architecture with persistent memory
-- Subagent spawning for parallel task execution
-- Web search and content fetching capabilities
-- File system integration with workspace management
-- Browser automation and control
+**Email (IMAP/SMTP)**
+- Read, send, and search email
+- Full folder management
+- Attachment handling
+- Persistent IMAP connections
 
-**AI Model Support**
-- Anthropic Claude (Opus, Sonnet, Haiku)
-- OpenAI GPT models
-- Google Gemini
-- Moonshot AI (Kimi)
-- Local model support via Ollama
+**Calendar (CalDAV)**
+- List, create, and update events
+- Multiple calendar support
+- Recurring event handling
 
-**Skills System**
-- Modular skill architecture
-- 30+ built-in skills including:
-  - GitHub operations
-  - Email management (Himalaya)
-  - Calendar integration
-  - Smart home control (Hue, HomeKit)
-  - Media processing (video, audio, images)
-  - News monitoring and summarization
+**Contacts (CardDAV)**
+- Search and manage contacts
+- Contact group support
+- vCard import/export
+
+**Tasks (VTODO)**
+- Manage todo items
+- Due dates and priorities
+- Task list organization
+
+**Agent Interfaces**
+- **MCP** (Model Context Protocol) — For AI agents like Claude
+- **CLI** — For terminal workflows
+- **REST API** — For custom integrations
+
+**Provider Support**
+- Google (Gmail) — OAuth2
+- Microsoft 365 / Outlook — OAuth2
+- Apple / iCloud — App-specific password
+- Fastmail — App password
+- Other — Any IMAP/SMTP provider
 
 **Security & Privacy**
 - Local-first architecture
-- 1Password integration for secrets management
-- Configurable sandboxing
-- No telemetry or external data collection
+- Credentials stored in macOS Keychain
+- No cloud processing
+- No telemetry or data collection
+- Guardrails for send approval and rate limiting
 
 ### 🛠️ Technical Stack
 
-**Agent Collaboration Tools**
+**Language & Framework**
+- Swift 6 (strict concurrency)
+- SwiftUI for macOS UI
+- Swift Package Manager
+
+**Networking**
+- SwiftNIO for IMAP/SMTP
+- URLSession for CalDAV/CardDAV
+- Hummingbird 2.x for REST API
+
+**Storage**
+- SQLite via GRDB.swift
+- FTS5 for full-text search
+- Keychain for credentials
+
+**Agent Collaboration Tools Used**
 - Claude Code (Anthropic)
 - Codex (OpenAI)
 - Commander (CodeRabbit)
@@ -54,40 +78,34 @@ OpenClaw 1.0.0 marks our first stable release — a personal AI assistant platfo
 **Models Used in Development**
 - Claude Opus 4.5 / Sonnet 4.6
 - GPT-5.4 Thinking
-- Kimi K2.5
-
-**Infrastructure**
-- Node.js runtime
-- TypeScript
-- SQLite for local data
-- QMD for vector search
+- Kimi K2.5 / Kimi Code
 
 ### 📝 Known Limitations
 
-- OAuth configuration required for some services
-- Homebrew formulas pending publication
-- Windows support in development
-- Some skills require additional CLI tools
+- macOS only (14.0+)
+- OAuth requires manual app registration for Google/Microsoft
+- CalDAV/CardDAV support varies by provider
+- Single MCP session at a time (exclusive lock)
 
 ### 🔮 What's Next
 
 Post-1.0 roadmap includes:
-- Pre-configured installable app with OAuth
-- Expanded model support
-- Enhanced agent team coordination
-- Additional platform integrations
+- Pre-configured OAuth apps (optional)
+- Additional provider presets
+- Improved CalDAV/CardDAV auto-discovery
+- Plugin system for custom handlers
 
 ---
 
-## About OpenClaw
+## About ClawMail
 
-OpenClaw is an open-source personal AI assistant platform created by Andrew Mitchell and Max Headroom.
+ClawMail is an open-source agent-first email client created by Andrew Mitchell and Max Headroom.
 
-**Homepage:** https://openclaw.ai  
-**Documentation:** https://docs.openclaw.ai  
-**Source:** https://github.com/openclaw/openclaw  
-**Community:** https://discord.com/invite/clawd
+**Homepage:** https://clawmail.app  
+**GitHub:** https://github.com/AppsAtMe/ClawMail  
+**Issues:** https://github.com/AppsAtMe/ClawMail/issues  
+**Discussions:** https://github.com/AppsAtMe/ClawMail/discussions
 
 ---
 
-*For installation instructions, see the main README.*
+*For installation instructions, see [INSTALL.md](INSTALL.md) or the main README.*

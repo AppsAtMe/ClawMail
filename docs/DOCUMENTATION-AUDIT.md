@@ -9,38 +9,24 @@
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Core Docs | 4 | ✅ Good |
-| New for 1.0 | 3 | ✅ Just Created |
-| Missing | 2 | ⚠️ Needed |
-| Needs Update | 2 | 🔧 Minor |
+| Core Docs | 5 | ✅ Good |
+| New for 1.0 | 5 | ✅ Just Created |
+| Missing | 1 | ⚠️ Needed |
+| Needs Update | 0 | ✅ Done |
 
 ---
 
-## ✅ Existing Docs (Good)
+## ✅ Core Documentation
 
-### `/docs/New-Team-Member-Guide.md`
-- **Purpose:** Onboarding for humans joining Andrew's projects
-- **Status:** ✅ Current, comprehensive
-- **Notes:** Well-structured, explains agent collaboration model
+### `/README.md` (Root)
+- **Purpose:** Main project README for GitHub
+- **Status:** ✅ Updated with happy path setup and links to docs
+- **Notes:** Error handling moved to ACCOUNTS.md
 
-### `/docs/claude-handoff-protocol.md`
-- **Purpose:** Terminal Claude ↔ Xcode Claude collaboration
-- **Status:** ✅ Current
-- **Notes:** Specific to iOS development workflow
-
-### `/docs/QMD-SETUP.md`
-- **Purpose:** QMD memory system installation & setup
-- **Status:** ✅ Current
-- **Notes:** Includes workarounds for OpenClaw #12021
-
-### `/docs/QMD-QUICKREF.md`
-- **Purpose:** Quick reference for QMD usage
-- **Status:** ✅ Current
-- **Notes:** Good for day-to-day lookups
-
----
-
-## ✅ New Docs Created Today
+### `/docs/ACCOUNTS.md`
+- **Purpose:** Account setup and troubleshooting for all providers
+- **Status:** ✅ Comprehensive guide with troubleshooting
+- **Notes:** Covers happy path in README, errors here
 
 ### `/docs/RELEASE-NOTES.md`
 - **Purpose:** Version history and release notes
@@ -48,101 +34,126 @@
 
 ### `/docs/ABOUT.md`
 - **Purpose:** About page with creators, tools, models, philosophy
-- **Status:** ✅ Created with Andrew, Max, and full tool stack listed
+- **Status:** ✅ Created
 
 ### `/docs/FAQ.md`
 - **Purpose:** Frequently asked questions
-- **Status:** ✅ Created with comprehensive FAQ covering setup, security, usage
+- **Status:** ✅ Created
 
----
-
-## ⚠️ Missing Docs (Needed for 1.0)
-
-### 1. `/README.md` (Root)
-- **Priority:** HIGH
-- **Purpose:** Main project README for GitHub
-- **Needed Content:**
-  - Project description
-  - Quick start installation
-  - Key features overview
-  - Link to full docs
-  - Contributing guidelines
-  - License info
-
-### 2. `/docs/INSTALL.md` or Installation Guide
-- **Priority:** HIGH
+### `/docs/INSTALL.md`
 - **Purpose:** Detailed installation instructions
-- **Needed Content:**
-  - Prerequisites
-  - Step-by-step install
-  - Configuration
-  - First run
-  - Troubleshooting
+- **Status:** ✅ Created
+
+### `/docs/DOCUMENTATION-AUDIT.md`
+- **Purpose:** This file — gap analysis
+- **Status:** ✅ Created
 
 ---
 
-## 🔧 Docs Needing Minor Updates
+## ✅ Existing Technical Docs
 
-### `/docs/claude-handoff-protocol.md`
-- **Status:** ⚠️ May need generalization
-- **Note:** Currently specific to Terminal ↔ Xcode Claude. May want a more generic "Agent Handoff Protocol" that covers other tools (Codex, etc.)
+### `SPECIFICATION.md`
+- **Purpose:** Complete feature specification
+- **Status:** ✅ Current
 
-### `/docs/QMD-SETUP.md`
-- **Status:** ⚠️ Contains workaround for bug #12021
-- **Note:** Should update once OpenClaw #12021 is fixed
+### `BLUEPRINT.md`
+- **Purpose:** Implementation blueprint with build phases
+- **Status:** ✅ Current
+
+### `ROADMAP.md`
+- **Purpose:** Remaining gaps, deferred features
+- **Status:** ✅ Current
+
+### `CLAUDE.md`
+- **Purpose:** Claude-specific context
+- **Status:** ✅ Current
+
+### `/docs/operations-reference.md`
+- **Purpose:** Runtime services, files, approvals
+- **Status:** ✅ Current
+
+---
+
+## ⚠️ Missing Docs
+
+### `/docs/README.md` (Docs Index)
+- **Priority:** MEDIUM
+- **Purpose:** Index of all documentation files
+- **Needed Content:**
+  - List of all docs with descriptions
+  - Quick links to commonly needed docs
+  - Recommended reading order for new users
+
+---
+
+## ✅ Recent Changes
+
+### README.md Cleanup
+- Moved error handling to ACCOUNTS.md
+- Kept happy path setup instructions
+- Added links to troubleshooting docs
+
+### New Files Created
+- RELEASE-NOTES.md — 1.0.0 release notes
+- ABOUT.md — Creators, philosophy, tools
+- FAQ.md — Common questions
+- INSTALL.md — Installation guide
+- ACCOUNTS.md — Provider setup & troubleshooting
+- DOCUMENTATION-AUDIT.md — This file
 
 ---
 
 ## 📋 Recommendations
 
 ### Before 1.0 Release
-1. **Create root README.md** — Essential for GitHub
-2. **Create INSTALL.md** — Essential for new users
-3. **Review all docs for consistency** — Tone, formatting, links
-4. **Add docs index** — `docs/README.md` listing all docs
+1. ✅ ~~Create root README.md~~ — Done
+2. ✅ ~~Create ACCOUNTS.md~~ — Done
+3. ✅ ~~Create INSTALL.md~~ — Done
+4. ⏳ Create docs/README.md (index) — Optional for 1.0
+5. ✅ Review all docs for consistency — Done
 
 ### Post-1.0
-1. **API Documentation** — If there's a public API
-2. **Skill Development Guide** — More detailed than current
-3. **Configuration Reference** — All config options
+1. **API Documentation** — Auto-generate from code
+2. **Plugin Development Guide** — For custom handlers
+3. **Advanced Configuration** — Beyond basic setup
 4. **Migration Guides** — For major version updates
 
 ---
 
-## Docs Structure (Proposed)
+## Docs Structure
 
 ```
-docs/
-├── README.md                    # Docs index
-├── RELEASE-NOTES.md             # ✅ Created
-├── ABOUT.md                     # ✅ Created
-├── FAQ.md                       # ✅ Created
-├── INSTALL.md                   # ⚠️ Needed
-├── CONFIGURATION.md             # Future
-├── API.md                       # Future
-├── guides/
-│   ├── New-Team-Member-Guide.md # ✅ Existing
-│   ├── claude-handoff-protocol.md # ✅ Existing
-│   └── agent-teams.md           # Future
-├── reference/
-│   ├── QMD-SETUP.md             # ✅ Existing
-│   ├── QMD-QUICKREF.md          # ✅ Existing
-│   └── tools.md                 # Future
-└── skills/
-    └── skill-development.md     # Future
+ClawMail/
+├── README.md                    # ✅ Main project README
+├── SPECIFICATION.md             # ✅ Feature spec
+├── BLUEPRINT.md                 # ✅ Implementation plan
+├── ROADMAP.md                   # ✅ Future plans
+├── CLAUDE.md                    # ✅ Claude context
+├── docs/
+│   ├── ABOUT.md                 # ✅ Creators & philosophy
+│   ├── ACCOUNTS.md              # ✅ Setup & troubleshooting
+│   ├── FAQ.md                   # ✅ Common questions
+│   ├── INSTALL.md               # ✅ Installation guide
+│   ├── RELEASE-NOTES.md         # ✅ Version history
+│   ├── DOCUMENTATION-AUDIT.md   # ✅ This file
+│   ├── operations-reference.md  # ✅ Runtime reference
+│   └── README.md                # ⚠️ Docs index (optional)
+├── Sources/
+│   └── ...
+└── Tests/
+    └── ...
 ```
 
 ---
 
 ## Action Items
 
-| Task | Priority | Owner |
-|------|----------|-------|
-| Create root README.md | HIGH | Andrew/Max |
-| Create INSTALL.md | HIGH | Andrew/Max |
-| Create docs/README.md (index) | MEDIUM | Max |
-| Review docs consistency | MEDIUM | Max |
-| Update QMD-SETUP when #12021 fixed | LOW | Max |
+| Task | Priority | Status |
+|------|----------|--------|
+| Fix OpenClaw → ClawMail references | HIGH | ✅ Done |
+| Move error handling to ACCOUNTS.md | HIGH | ✅ Done |
+| Update Andrew's email | HIGH | ✅ Done |
+| Create docs/README.md index | LOW | ⏳ Optional |
 
 ---
 

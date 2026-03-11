@@ -1,4 +1,4 @@
-![ClawMail](GitHubBanner.png)
+![ClawMail](Assets/GitHubBanner.png)
 
 # ClawMail
 
@@ -409,10 +409,12 @@ ClawMail/
 
 ## Documentation
 
-- [`SPECIFICATION.md`](SPECIFICATION.md) — Complete feature specification
-- [`BLUEPRINT.md`](BLUEPRINT.md) — Implementation blueprint with build phases
-- [`ROADMAP.md`](ROADMAP.md) — Remaining gaps, deferred features, and testing backlog
+- [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md) — Complete feature specification
+- [`docs/BLUEPRINT.md`](docs/BLUEPRINT.md) — Implementation blueprint with build phases
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — Remaining gaps, deferred features, and testing backlog
 - [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md) — **Account setup guide and troubleshooting** for all providers
+- [`docs/FAQ.md`](docs/FAQ.md) — Frequently asked questions
+- [`docs/INSTALL.md`](docs/INSTALL.md) — Installation guide
 - [`docs/operations-reference.md`](docs/operations-reference.md) — Runtime services, files, approvals, and operational behavior
 
 **Troubleshooting tip:** If you run into issues during account setup, check [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md) for provider-specific troubleshooting steps.

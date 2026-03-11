@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -14,18 +17,51 @@ jobs:
   build-and-test:
     name: Build & Test
     runs-on: macos-15
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Set Up Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
+      - name: Select latest stable Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          selected_app="$(
+            python3 - <<'PY'
+          from pathlib import Path
+          import plistlib
+          import sys
+
+          candidates = []
+          for app in Path("/Applications").glob("Xcode*.app"):
+              if "beta" in app.name.lower():
+                  continue
+              plist_path = app / "Contents" / "version.plist"
+              if not plist_path.exists():
+                  continue
+              with plist_path.open("rb") as handle:
+                  version = plistlib.load(handle).get("CFBundleShortVersionString", "0")
+              key = tuple(int(part) for part in version.split("."))
+              candidates.append((key, str(app), version))
+
+          if not candidates:
+              sys.exit("No stable Xcode installations found under /Applications")
+
+          _, app_path, version = sorted(candidates)[-1]
+          print(app_path)
+          print(version, file=sys.stderr)
+          PY
+          )"
+
+          sudo xcode-select -s "$selected_app/Contents/Developer"
+          echo "Selected Xcode at $selected_app"
+          xcodebuild -version
 
       - name: Cache SPM dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .build
           key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}

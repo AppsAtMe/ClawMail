@@ -1181,7 +1181,7 @@ The MCP server process is launched by the MCP client (e.g., Claude Code). It con
   - Port number field (default 24601)
   - API key display (masked with eye toggle) + copy button + regenerate button
   - MCP server status (running/stopped)
-  - CLI path display (`/usr/local/bin/clawmail`)
+  - CLI path display (the bundled `ClawMailCLI` executable path)
   - Webhook URL field
   - "Copy MCP Config" button — copies the `.mcp.json` snippet to clipboard
 
@@ -1246,12 +1246,8 @@ cask "clawmail" do
   homepage "https://github.com/<org>/ClawMail"
 
   app "ClawMail.app"
-  binary "#{appdir}/ClawMail.app/Contents/MacOS/ClawMailCLI", target: "/usr/local/bin/clawmail"
-  binary "#{appdir}/ClawMail.app/Contents/MacOS/ClawMailMCP", target: "/usr/local/bin/clawmail-mcp"
-
-  postflight do
-    # App installation is sufficient; binary stanzas expose the CLI tools
-  end
+  binary "#{appdir}/ClawMail.app/Contents/MacOS/ClawMailCLI", target: "clawmail"
+  binary "#{appdir}/ClawMail.app/Contents/MacOS/ClawMailMCP", target: "clawmail-mcp"
 
   uninstall launchctl: "com.clawmail.agent",
             quit: "com.clawmail.app"
@@ -1289,6 +1285,7 @@ test:
 install: build
 	cp -r build/ClawMail.app /Applications/
 	ln -sf /Applications/ClawMail.app/Contents/MacOS/ClawMailCLI /usr/local/bin/clawmail
+	ln -sf /Applications/ClawMail.app/Contents/MacOS/ClawMailMCP /usr/local/bin/clawmail-mcp
 ```
 
 ### Verification

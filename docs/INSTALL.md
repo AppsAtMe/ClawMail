@@ -101,7 +101,7 @@ ClawMail runs as a menu bar icon (no Dock icon). On first launch with no account
    - Test connection
    - Set a label (e.g., `work`, `personal`)
 
-See [docs/ACCOUNTS.md](docs/ACCOUNTS.md) for detailed setup instructions for each provider.
+See [ACCOUNTS.md](ACCOUNTS.md) for detailed setup instructions for each provider.
 
 ---
 
@@ -114,7 +114,7 @@ Add to your `.mcp.json`:
 {
   "mcpServers": {
     "clawmail": {
-      "command": "/usr/local/bin/clawmail-mcp"
+      "command": "/Applications/ClawMail.app/Contents/MacOS/ClawMailMCP"
     }
   }
 }
@@ -148,7 +148,7 @@ Removes the app, symlinks, and LaunchAgent.
 - Run `swift build` to see detailed errors
 
 **Cannot connect to email:**
-- See [docs/ACCOUNTS.md](docs/ACCOUNTS.md) for provider-specific troubleshooting
+- See [ACCOUNTS.md](ACCOUNTS.md) for provider-specific troubleshooting
 
 **Permission denied:**
 - You may need to grant ClawMail permissions in System Settings → Privacy & Security

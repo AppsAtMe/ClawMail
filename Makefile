@@ -1,4 +1,4 @@
-.PHONY: build release test artwork bundle sign notarize dmg install uninstall clean test-infra-up test-infra-down
+.PHONY: build release test artwork bundle sign notarize dmg install uninstall clean test-infra-up test-infra-down test-all
 
 # ──────────────────────────────────────────────
 # Configuration (override on command line)
@@ -174,6 +174,8 @@ test-infra-up:
 test-infra-down:
 	docker compose down
 
-test-all: test-infra-up
+test-all:
+	@set -e; \
+	trap '$(MAKE) test-infra-down' EXIT; \
+	$(MAKE) test-infra-up; \
 	swift test
-	$(MAKE) test-infra-down

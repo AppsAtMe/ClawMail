@@ -124,7 +124,7 @@ struct APITab: View {
                     {
                       "mcpServers": {
                         "clawmail": {
-                          "command": "/usr/local/bin/clawmail-mcp",
+                          "command": "\(Self.bundledMCPExecutablePath)",
                           "args": []
                         }
                       }
@@ -148,7 +148,7 @@ struct APITab: View {
 
             Section("CLI") {
                 LabeledContent("Path") {
-                    Text("/usr/local/bin/clawmail")
+                    Text(Self.bundledCLIExecutablePath)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                 }
@@ -459,6 +459,25 @@ struct APITab: View {
 
     private static func defaultGenerateAPIKeyAction() async throws -> String {
         try await KeychainManager().generateAPIKey()
+    }
+
+    private static var bundledCLIExecutablePath: String {
+        bundledExecutableDirectory.appending("/ClawMailCLI")
+    }
+
+    private static var bundledMCPExecutablePath: String {
+        bundledExecutableDirectory.appending("/ClawMailMCP")
+    }
+
+    private static var bundledExecutableDirectory: String {
+        if let executableURL = Bundle.main.executableURL,
+           executableURL.lastPathComponent == "ClawMailApp" {
+            return executableURL.deletingLastPathComponent().path
+        }
+
+        return URL(fileURLWithPath: LaunchAgentManager.installedAppExecutablePath)
+            .deletingLastPathComponent()
+            .path
     }
 
     @discardableResult

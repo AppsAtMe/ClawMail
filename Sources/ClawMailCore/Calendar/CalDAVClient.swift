@@ -106,19 +106,28 @@ public actor CalDAVClient {
     /// Test authentication by performing a basic PROPFIND on the base URL.
     /// Handles .well-known redirects by following them to the actual DAV endpoint.
     public func authenticate() async throws {
-        // First, handle .well-known URLs that require redirect following
-        let urlToProbe = try await resolveWellKnownIfNeeded(serverURL)
-        
-        var request = URLRequest(url: urlToProbe)
-        request.httpMethod = "PROPFIND"
-        request.setValue("0", forHTTPHeaderField: "Depth")
-        request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        try await applyAuth(to: &request)
+        let probeResult = try await resolveWellKnownIfNeeded(serverURL)
 
-        let body = WebDAVXMLBuilder.propfind(properties: ["d:current-user-principal"])
-        request.httpBody = body.data(using: .utf8)
+        let data: Data
+        let response: URLResponse
+        if let cachedData = probeResult.data, let cachedResponse = probeResult.response {
+            data = cachedData
+            response = cachedResponse
+        } else {
+            var request = URLRequest(url: probeResult.url)
+            request.httpMethod = "PROPFIND"
+            request.setValue("0", forHTTPHeaderField: "Depth")
+            request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
+            try await applyAuth(to: &request)
+            request.httpBody = WebDAVXMLBuilder.propfind(properties: ["d:current-user-principal"]).data(using: .utf8)
 
-        let (data, response) = try await session.data(for: request)
+            let requestResult = try await session.data(
+                for: request,
+                delegate: DAVRedirectPreservingDelegate(serviceName: "CalDAV", templateRequest: request)
+            )
+            data = requestResult.0
+            response = requestResult.1
+        }
         try updateServerURL(from: response)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ClawMailError.connectionError("Invalid response from CalDAV server")
@@ -141,26 +150,23 @@ public actor CalDAVClient {
     }
     
     /// If the URL is a .well-known path, probe it and follow redirects to find the actual endpoint.
-    private func resolveWellKnownIfNeeded(_ url: URL) async throws -> URL {
-        // Only special-case .well-known URLs
+    private func resolveWellKnownIfNeeded(_ url: URL) async throws -> DAVAuthenticationProbeResult {
         guard url.path.lowercased().contains("/.well-known/") else {
-            return url
+            return .direct(url)
         }
-        
-        // Do an authenticated PROPFIND on the .well-known URL
+
         var request = URLRequest(url: url)
         request.httpMethod = "PROPFIND"
         request.setValue("0", forHTTPHeaderField: "Depth")
+        request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
         try await applyAuth(to: &request)
-        
-        let (_, response) = try await session.data(for: request)
-        
-        // If we got a redirect, use the final URL
-        if let effectiveURL = response.url, effectiveURL.absoluteString != url.absoluteString {
-            return effectiveURL
-        }
-        
-        return url
+        request.httpBody = WebDAVXMLBuilder.propfind(properties: ["d:current-user-principal"]).data(using: .utf8)
+
+        let (data, response) = try await session.data(
+            for: request,
+            delegate: DAVRedirectPreservingDelegate(serviceName: "CalDAV", templateRequest: request)
+        )
+        return DAVAuthenticationProbeResult(url: response.url ?? url, data: data, response: response)
     }
 
     // MARK: - Calendar Operations
@@ -665,14 +671,11 @@ private final class WebDAVXMLParserDelegate: NSObject, XMLParserDelegate, @unche
 
     var items: [WebDAVResponseItem] = []
     private var currentItem: WebDAVResponseItem?
-    private var currentElement: String = ""
     private var currentText: String = ""
     private var inResponse: Bool = false
     private var inPropStat: Bool = false
     private var inProp: Bool = false
-    private var inCalendarData: Bool = false
-    private var inCalendarCollection: Bool = false
-    private var inSupportedComponent: Bool = false
+    private var propertyStack: [String] = []
 
     func parser(
         _ parser: XMLParser,
@@ -682,7 +685,6 @@ private final class WebDAVXMLParserDelegate: NSObject, XMLParserDelegate, @unche
         attributes: [String: String] = [:]
     ) {
         let localName = elementName.localXMLName
-        currentElement = localName
         currentText = ""
 
         switch localName {
@@ -703,7 +705,9 @@ private final class WebDAVXMLParserDelegate: NSObject, XMLParserDelegate, @unche
                 inProp = true
             }
         case "calendar-data":
-            inCalendarData = true
+            if inProp {
+                propertyStack.append(localName)
+            }
         case "calendar", "C:calendar":
             if inProp {
                 currentItem?.isCalendarCollection = true
@@ -713,6 +717,9 @@ private final class WebDAVXMLParserDelegate: NSObject, XMLParserDelegate, @unche
                 currentItem?.supportedComponents.insert(name)
             }
         default:
+            if inProp, shouldTrackProperty(named: localName) {
+                propertyStack.append(localName)
+            }
             break
         }
     }
@@ -741,16 +748,11 @@ private final class WebDAVXMLParserDelegate: NSObject, XMLParserDelegate, @unche
             inPropStat = false
         case "prop":
             inProp = false
+            propertyStack.removeAll()
         case "href":
             if inProp {
-                // href inside a property (like calendar-home-set or current-user-principal)
-                let propName: String
-                // Store as the parent property
-                if currentItem != nil {
-                    // We just use a generic key; the caller will check for it
-                    propName = "calendar-home-set"
-                    currentItem?.properties[propName] = trimmed
-                    currentItem?.properties["current-user-principal"] = trimmed
+                if let propertyName = propertyStack.last {
+                    currentItem?.properties[propertyName] = trimmed
                 }
             } else if inResponse && currentItem != nil {
                 currentItem?.href = trimmed
@@ -759,26 +761,45 @@ private final class WebDAVXMLParserDelegate: NSObject, XMLParserDelegate, @unche
             if inProp {
                 currentItem?.properties["displayname"] = trimmed
             }
+            popTrackedProperty(named: localName)
         case "calendar-color":
             if inProp {
                 currentItem?.properties["calendar-color"] = trimmed
             }
+            popTrackedProperty(named: localName)
         case "calendar-data":
             if inProp {
                 currentItem?.calendarData = currentText
             }
-            inCalendarData = false
+            popTrackedProperty(named: localName)
         case "status":
             if inPropStat, trimmed.contains("200") {
                 // status OK
             }
         default:
             if inProp && !trimmed.isEmpty {
-                currentItem?.properties[localName] = trimmed
+                if propertyStack.last == localName {
+                    currentItem?.properties[localName] = trimmed
+                }
             }
+            popTrackedProperty(named: localName)
         }
 
         currentText = ""
+    }
+
+    private func shouldTrackProperty(named localName: String) -> Bool {
+        switch localName {
+        case "response", "propstat", "prop", "href", "resourcetype", "collection", "calendar", "status", "comp":
+            return false
+        default:
+            return true
+        }
+    }
+
+    private func popTrackedProperty(named localName: String) {
+        guard propertyStack.last == localName else { return }
+        propertyStack.removeLast()
     }
 }
 

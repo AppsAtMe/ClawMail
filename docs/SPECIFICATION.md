@@ -93,7 +93,7 @@ The MCP (Model Context Protocol) server is the primary agent interface. It uses 
 {
   "mcpServers": {
     "clawmail": {
-      "command": "/usr/local/bin/clawmail-mcp"
+      "command": "/Applications/ClawMail.app/Contents/MacOS/ClawMailMCP"
     }
   }
 }
@@ -989,7 +989,7 @@ brew install --cask clawmail
 
 This installs:
 - `/Applications/ClawMail.app` — the menu bar application
-- `/usr/local/bin/clawmail` — symlink to the CLI inside the app bundle
+- `clawmail` / `clawmail-mcp` — command shims exposed from the app bundle via the chosen `BIN_DIR` or Homebrew prefix
 
 ### First Run
 
@@ -1011,7 +1011,7 @@ After installation, add to the project or global `.mcp.json`:
 {
   "mcpServers": {
     "clawmail": {
-      "command": "/usr/local/bin/clawmail-mcp"
+      "command": "/Applications/ClawMail.app/Contents/MacOS/ClawMailMCP"
     }
   }
 }

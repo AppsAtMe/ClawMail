@@ -94,19 +94,25 @@ public actor CardDAVClient {
     /// Test authentication by performing a PROPFIND on the base URL.
     /// Handles .well-known redirects by following them to the actual DAV endpoint.
     public func authenticate() async throws {
-        // First, handle .well-known URLs that require redirect following
-        let urlToProbe = try await resolveWellKnownIfNeeded(serverURL)
-        
-        var request = URLRequest(url: urlToProbe)
-        request.httpMethod = "PROPFIND"
-        request.setValue("0", forHTTPHeaderField: "Depth")
-        request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        try await applyAuth(to: &request)
+        let probeResult = try await resolveWellKnownIfNeeded(serverURL)
 
-        let body = CardDAVXMLBuilder.propfind(properties: ["d:current-user-principal"])
-        request.httpBody = body.data(using: .utf8)
+        let data: Data
+        let response: URLResponse
+        if let cachedData = probeResult.data, let cachedResponse = probeResult.response {
+            data = cachedData
+            response = cachedResponse
+        } else {
+            var request = URLRequest(url: probeResult.url)
+            request.httpMethod = "PROPFIND"
+            request.setValue("0", forHTTPHeaderField: "Depth")
+            request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
+            try await applyAuth(to: &request)
+            request.httpBody = CardDAVXMLBuilder.propfind(properties: ["d:current-user-principal"]).data(using: .utf8)
 
-        let (data, response) = try await send(request, context: "authenticate")
+            let requestResult = try await send(request, context: "authenticate")
+            data = requestResult.0
+            response = requestResult.1
+        }
         try updateServerURL(from: response)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ClawMailError.connectionError("Invalid response from CardDAV server")
@@ -551,70 +557,24 @@ public actor CardDAVClient {
     }
 
     /// If the URL is a .well-known path, probe it and follow redirects to find the actual endpoint.
-    private func resolveWellKnownIfNeeded(_ url: URL) async throws -> URL {
-        // Only special-case .well-known URLs
+    private func resolveWellKnownIfNeeded(_ url: URL) async throws -> DAVAuthenticationProbeResult {
         guard url.path.lowercased().contains("/.well-known/") else {
-            return url
+            return .direct(url)
         }
-        
-        // Do an authenticated PROPFIND on the .well-known URL
+
         var request = URLRequest(url: url)
         request.httpMethod = "PROPFIND"
         request.setValue("0", forHTTPHeaderField: "Depth")
+        request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
         try await applyAuth(to: &request)
-        
-        let (_, response) = try await send(request, context: "resolveWellKnown")
-        
-        // If we got a redirect, use the final URL
-        if let effectiveURL = response.url, effectiveURL.absoluteString != url.absoluteString {
-            return effectiveURL
-        }
-        
-        return url
+        request.httpBody = CardDAVXMLBuilder.propfind(properties: ["d:current-user-principal"]).data(using: .utf8)
+
+        let (data, response) = try await send(request, context: "resolveWellKnown")
+        return DAVAuthenticationProbeResult(url: response.url ?? url, data: data, response: response)
     }
 
     private func log(_ message: String) {
         fputs("ClawMail CardDAV: \(message)\n", stderr)
-    }
-}
-
-private final class DAVRedirectPreservingDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    private let serviceName: String
-    private let templateRequest: URLRequest
-
-    init(serviceName: String, templateRequest: URLRequest) {
-        self.serviceName = serviceName
-        self.templateRequest = templateRequest
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest,
-        completionHandler: @escaping @Sendable (URLRequest?) -> Void
-    ) {
-        guard let redirectedURL = request.url,
-              (try? DAVURLValidator.validateConfiguredURL(redirectedURL, serviceName: serviceName)) != nil else {
-            let source = response.url?.absoluteString ?? "<unknown>"
-            let blocked = request.url?.absoluteString ?? "<unknown>"
-            fputs("ClawMail \(serviceName): blocked redirect \(source) -> \(blocked)\n", stderr)
-            completionHandler(nil)
-            return
-        }
-
-        let source = response.url?.absoluteString ?? "<unknown>"
-        fputs("ClawMail \(serviceName): redirect HTTP \(response.statusCode) \(source) -> \(redirectedURL.absoluteString)\n", stderr)
-
-        var redirectedRequest = request
-        redirectedRequest.httpMethod = templateRequest.httpMethod
-        redirectedRequest.httpBody = templateRequest.httpBody
-        redirectedRequest.httpBodyStream = nil
-        for (field, value) in templateRequest.allHTTPHeaderFields ?? [:] {
-            redirectedRequest.setValue(value, forHTTPHeaderField: field)
-        }
-
-        completionHandler(redirectedRequest)
     }
 }
 
@@ -740,12 +700,11 @@ private final class CardDAVXMLParserDelegate: NSObject, XMLParserDelegate, @unch
 
     var items: [CardDAVResponseItem] = []
     private var currentItem: CardDAVResponseItem?
-    private var currentElement: String = ""
     private var currentText: String = ""
     private var inResponse: Bool = false
     private var inPropStat: Bool = false
     private var inProp: Bool = false
-    private var inAddressData: Bool = false
+    private var propertyStack: [String] = []
 
     func parser(
         _ parser: XMLParser,
@@ -755,7 +714,6 @@ private final class CardDAVXMLParserDelegate: NSObject, XMLParserDelegate, @unch
         attributes: [String: String] = [:]
     ) {
         let localName = elementName.localXMLName
-        currentElement = localName
         currentText = ""
 
         switch localName {
@@ -775,12 +733,17 @@ private final class CardDAVXMLParserDelegate: NSObject, XMLParserDelegate, @unch
                 inProp = true
             }
         case "address-data":
-            inAddressData = true
+            if inProp {
+                propertyStack.append(localName)
+            }
         case "addressbook":
             if inProp {
                 currentItem?.isAddressBookCollection = true
             }
         default:
+            if inProp, shouldTrackProperty(named: localName) {
+                propertyStack.append(localName)
+            }
             break
         }
     }
@@ -809,10 +772,12 @@ private final class CardDAVXMLParserDelegate: NSObject, XMLParserDelegate, @unch
             inPropStat = false
         case "prop":
             inProp = false
+            propertyStack.removeAll()
         case "href":
             if inProp {
-                currentItem?.properties["addressbook-home-set"] = trimmed
-                currentItem?.properties["current-user-principal"] = trimmed
+                if let propertyName = propertyStack.last {
+                    currentItem?.properties[propertyName] = trimmed
+                }
             } else if inResponse && currentItem != nil {
                 currentItem?.href = trimmed
             }
@@ -820,18 +785,36 @@ private final class CardDAVXMLParserDelegate: NSObject, XMLParserDelegate, @unch
             if inProp {
                 currentItem?.properties["displayname"] = trimmed
             }
+            popTrackedProperty(named: localName)
         case "address-data":
             if inProp {
                 currentItem?.addressData = currentText
             }
-            inAddressData = false
+            popTrackedProperty(named: localName)
         default:
             if inProp && !trimmed.isEmpty {
-                currentItem?.properties[localName] = trimmed
+                if propertyStack.last == localName {
+                    currentItem?.properties[localName] = trimmed
+                }
             }
+            popTrackedProperty(named: localName)
         }
 
         currentText = ""
+    }
+
+    private func shouldTrackProperty(named localName: String) -> Bool {
+        switch localName {
+        case "response", "propstat", "prop", "href", "resourcetype", "collection", "status", "addressbook":
+            return false
+        default:
+            return true
+        }
+    }
+
+    private func popTrackedProperty(named localName: String) {
+        guard propertyStack.last == localName else { return }
+        propertyStack.removeLast()
     }
 }
 

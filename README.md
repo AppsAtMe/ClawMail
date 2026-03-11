@@ -149,11 +149,13 @@ Add to your Claude Code `.mcp.json` or MCP settings:
 {
   "mcpServers": {
     "clawmail": {
-      "command": "/usr/local/bin/clawmail-mcp"
+      "command": "/Applications/ClawMail.app/Contents/MacOS/ClawMailMCP"
     }
   }
 }
 ```
+
+If you installed ClawMail somewhere other than `/Applications`, point `command` at that bundle's `ClawMailMCP` executable instead.
 
 ClawMail provides 34 MCP tools across email, calendar, contacts, tasks, and administration. It also pushes server-initiated notifications for new mail, connection status changes, and errors.
 

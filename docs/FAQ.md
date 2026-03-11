@@ -91,7 +91,7 @@ All operations are available through three interfaces:
 4. Select your provider (Google, Microsoft, Apple, Fastmail, or Other)
 5. Follow the setup wizard
 
-See [docs/ACCOUNTS.md](docs/ACCOUNTS.md) for detailed setup instructions.
+See [ACCOUNTS.md](ACCOUNTS.md) for detailed setup instructions.
 
 ### What providers are supported?
 
@@ -116,7 +116,7 @@ Add to your Claude Code `.mcp.json`:
 {
   "mcpServers": {
     "clawmail": {
-      "command": "/usr/local/bin/clawmail-mcp"
+      "command": "/Applications/ClawMail.app/Contents/MacOS/ClawMailMCP"
     }
   }
 }
@@ -137,7 +137,7 @@ clawmail calendar list --account=work --from=2026-03-01 --to=2026-03-31
 
 ### I can't connect to my email server
 
-See [docs/ACCOUNTS.md](docs/ACCOUNTS.md) for provider-specific troubleshooting. Common issues:
+See [ACCOUNTS.md](ACCOUNTS.md) for provider-specific troubleshooting. Common issues:
 - Check IMAP/SMTP server settings
 - Verify you're using an app-specific password (not your regular password)
 - Check firewall settings
@@ -155,7 +155,7 @@ Not all providers support CalDAV/CardDAV:
 - Microsoft — DAV support varies by tenant
 - Apple/Fastmail — Usually works with default settings
 
-See [docs/ACCOUNTS.md](docs/ACCOUNTS.md) for details.
+See [ACCOUNTS.md](ACCOUNTS.md) for details.
 
 ---
 

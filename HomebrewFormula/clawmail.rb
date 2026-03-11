@@ -10,12 +10,8 @@ cask "clawmail" do
   depends_on macos: ">= :sonoma"
 
   app "ClawMail.app"
-
-  postflight do
-    # Symlink CLI and MCP server to /usr/local/bin
-    system_command "ln", args: ["-sf", "#{appdir}/ClawMail.app/Contents/MacOS/ClawMailCLI", "/usr/local/bin/clawmail"]
-    system_command "ln", args: ["-sf", "#{appdir}/ClawMail.app/Contents/MacOS/ClawMailMCP", "/usr/local/bin/clawmail-mcp"]
-  end
+  binary "#{appdir}/ClawMail.app/Contents/MacOS/ClawMailCLI", target: "clawmail"
+  binary "#{appdir}/ClawMail.app/Contents/MacOS/ClawMailMCP", target: "clawmail-mcp"
 
   uninstall launchctl: "com.clawmail.agent",
             quit:      "com.clawmail.app"

@@ -419,6 +419,10 @@ ClawMail/
 
 **Troubleshooting tip:** If you run into issues during account setup, check [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md) for provider-specific troubleshooting steps.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on reporting bugs, requesting features, and submitting pull requests.
+
 ## License
 
-MIT
+[MIT](LICENSE)

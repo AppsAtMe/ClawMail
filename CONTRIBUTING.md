@@ -4,9 +4,7 @@ Thank you for your interest in contributing to ClawMail!
 
 ## Code of Conduct
 
-**Treat humans and agents alike with the respect and dignity that they deserve.**
-
-Be respectful, be helpful, assume good intent. We're building tools for everyone.
+Please read our [Code of Conduct](CODE_OF_CONDUCT.md). The short version: treat humans and agents alike with the respect and dignity that they deserve.
 
 ## How to Contribute
 

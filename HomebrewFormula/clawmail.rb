@@ -8,7 +8,7 @@
 
 cask "clawmail" do
   version "1.0.0"
-  sha256 :no_check # Will be computed at release time
+  sha256 "2a1eb3c53cb26ac044eba31766768113b84398dc473d1feab44b00c8931c8fa8"
 
   url "https://github.com/AppsAtMe/ClawMail/releases/download/v#{version}/ClawMail-#{version}.dmg"
   name "ClawMail"

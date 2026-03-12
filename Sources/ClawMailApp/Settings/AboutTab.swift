@@ -50,12 +50,28 @@ struct AboutTab: View {
     private var heroCard: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(Color.white)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.06, green: 0.40, blue: 0.45),
+                            Color(red: 0.03, green: 0.28, blue: 0.32),
+                            Color(red: 0.01, green: 0.18, blue: 0.20)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
                 .overlay(
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                        .stroke(Color.white.opacity(0.25), lineWidth: 1)
                 )
-                .shadow(color: Color.black.opacity(0.08), radius: 24, x: 0, y: 8)
+                .overlay(alignment: .topLeading) {
+                    Circle()
+                        .fill(Color.white.opacity(0.16))
+                        .frame(width: 240, height: 240)
+                        .blur(radius: 70)
+                        .offset(x: -36, y: -92)
+                }
 
             ViewThatFits(in: .horizontal) {
                 heroRowLayout
@@ -63,6 +79,7 @@ struct AboutTab: View {
             }
             .padding(24)
         }
+        .environment(\.colorScheme, .dark)
     }
 
     private var heroRowLayout: some View {
@@ -370,29 +387,29 @@ struct AboutTab: View {
     private func heroPill(_ text: String) -> some View {
         Text(text)
             .font(.caption.weight(.semibold))
-            .foregroundStyle(Color(red: 0.08, green: 0.32, blue: 0.36))
+            .foregroundStyle(Color(red: 0.05, green: 0.24, blue: 0.42))
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
                 Capsule(style: .continuous)
-                    .fill(Color(red: 0.75, green: 0.92, blue: 0.94).opacity(0.70))
+                    .fill(Color.white.opacity(0.72))
             )
     }
 
     private var heroEyebrowColor: Color {
-        Color(red: 0.12, green: 0.45, blue: 0.50)
+        Color.white.opacity(0.74)
     }
 
     private var heroTitleColor: Color {
-        Color(red: 0.08, green: 0.32, blue: 0.36)
+        Color.white.opacity(0.98)
     }
 
     private var heroBodyColor: Color {
-        Color(red: 0.15, green: 0.35, blue: 0.38)
+        Color.white.opacity(0.90)
     }
 
     private var heroSecondaryBodyColor: Color {
-        Color(red: 0.20, green: 0.38, blue: 0.40).opacity(0.80)
+        Color.white.opacity(0.72)
     }
 
     private func metricCard(title: String, value: String, subtitle: String, tint: Color) -> some View {

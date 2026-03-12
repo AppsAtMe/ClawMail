@@ -8,7 +8,7 @@ from pathlib import Path
 import shutil
 
 REPO_ROOT = Path(__file__).parent.parent
-SOURCE_ICON = REPO_ROOT / "Sources" / "ClawMailApp" / "Resources" / "Branding" / "AppIcon-New.png"
+SOURCE_ICON = REPO_ROOT / "Sources" / "ClawMailApp" / "Resources" / "Branding" / "AppIconArtwork.png"
 OUTPUT_ICNS = REPO_ROOT / "Sources" / "ClawMailApp" / "Resources" / "AppIcon.icns"
 
 def main():

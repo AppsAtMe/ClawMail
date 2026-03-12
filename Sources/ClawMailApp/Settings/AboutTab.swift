@@ -53,9 +53,9 @@ struct AboutTab: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.08, green: 0.35, blue: 0.48),
-                            Color(red: 0.04, green: 0.22, blue: 0.35),
-                            Color(red: 0.02, green: 0.12, blue: 0.22)
+                            Color(red: 0.06, green: 0.40, blue: 0.45),
+                            Color(red: 0.03, green: 0.28, blue: 0.32),
+                            Color(red: 0.01, green: 0.18, blue: 0.20)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing

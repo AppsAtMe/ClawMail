@@ -342,7 +342,7 @@ struct AboutTab: View {
     }
 
     private var heroArtwork: some View {
-        artworkView(asset: .appIconArtwork, cornerRadius: 28, fallbackSystemImage: "mail.stack.fill")
+        artworkView(asset: .aboutArtwork, cornerRadius: 28, fallbackSystemImage: "mail.stack.fill")
             .frame(width: 196, height: 196)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("ClawMail artwork")

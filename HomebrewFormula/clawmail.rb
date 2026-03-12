@@ -1,6 +1,14 @@
+# To use this tap:
+#   brew tap AppsAtMe/clawmail
+#   brew install --cask clawmail
+#
+# To uninstall:
+#   brew uninstall --cask clawmail
+#   brew untap AppsAtMe/clawmail
+
 cask "clawmail" do
   version "1.0.0"
-  sha256 :no_check # computed at release time
+  sha256 :no_check # Will be computed at release time
 
   url "https://github.com/AppsAtMe/ClawMail/releases/download/v#{version}/ClawMail-#{version}.dmg"
   name "ClawMail"

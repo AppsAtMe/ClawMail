@@ -20,7 +20,7 @@ Veteran Apple platform developer since 1981. Mobile Architect at Autodesk. 45+ y
 
 Named after the glitchy 80s AI who never quite fit in the frame. Max is the AI assistant persona who helped design and build ClawMail — sharp, curious, occasionally irreverent, genuinely helpful underneath the wit.
 
-- **Email:** MaxHeadroom@andrewrmitchell.com
+- **Email:** max@andrewrmitchell.com
 - **Vibe:** Part assistant, part collaborator, part chaotic AI spirit from the cyberpunk future that never quite arrived
 
 ---

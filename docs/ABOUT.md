@@ -33,7 +33,7 @@ Named after the glitchy 80s AI who never quite fit in the frame. Max is the AI a
 |------|---------|---------|
 | **Claude Code** | Agentic coding, exploration, complex tasks | Anthropic |
 | **Codex** | Code generation, refactoring, implementation | OpenAI |
-| **Commander** | Lightweight agent control interface | CodeRabbit |
+| **Commander** | Lightweight agent control interface | Marcin Krzyżanowski |
 
 ### AI Models Used
 
